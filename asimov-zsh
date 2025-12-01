@@ -1,0 +1,478 @@
+#!/usr/bin/env zsh
+# -*- mode: zsh; sh-indentation: 4; indent-tabs-mode: nil; sh-basic-offset: 4; -*-
+
+# Optimized Asimov script using ZSH builtins and fd for faster filesystem search
+#
+# Look through the local filesystem and exclude development dependencies
+# from Apple Time Machine backups.
+#
+# Performance improvements over bash version:
+# - Uses ZSH builtins instead of external tools where possible
+# - Uses `fd` for parallel filesystem search (much faster than find)
+# - ZSH native string manipulation instead of external cut/grep
+# - Uses zsh/stat module for faster file operations
+#
+# @version 0.5.0
+# @author  Steve Grunwell (Original Author)
+# @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
+# @license MIT
+
+# Enable strict mode
+setopt ERR_EXIT NO_UNSET PIPE_FAIL
+
+# Load ZSH modules for performance
+zmodload zsh/stat 2>/dev/null || true
+zmodload zsh/datetime 2>/dev/null || true
+zmodload zsh/parameter 2>/dev/null || true
+zmodload zsh/zutil 2>/dev/null || true
+
+# =============================================================================
+# Configuration via environment variables
+# =============================================================================
+# Basic Configuration:
+# ASIMOV_ROOT: Root directory to scan (default: ~)
+# ASIMOV_SKIP_TRASH: Skip ~/.Trash (default: true)
+# ASIMOV_SKIP_LIBRARY: Skip ~/Library (default: true)
+# ASIMOV_DRY_RUN: Don't actually exclude, just print (default: false)
+# ASIMOV_VERBOSE: Print extra debug info (default: false)
+#
+# Modes:
+# ASIMOV_LIST_EXCLUSIONS: List current exclusions instead of scanning (default: false)
+# ASIMOV_INIT_CACHE: Initialize cache from current exclusions (default: false)
+#
+# Optimization Flags (set to "true" to enable):
+# ASIMOV_OPT_CACHE: Enable exclusion status caching (default: false)
+# ASIMOV_OPT_INCREMENTAL: Only scan recently modified dirs (default: false)
+# ASIMOV_OPT_INCREMENTAL_DAYS: Days for incremental scan (default: 7)
+# ASIMOV_OPT_PARALLEL: Enable parallel tmutil calls (default: false)
+# ASIMOV_OPT_PARALLEL_JOBS: Max parallel jobs (default: 4)
+# ASIMOV_OPT_GITIGNORE: Use fd's gitignore awareness (default: false)
+# ASIMOV_OPT_DUST: Use dust instead of du for size (default: false)
+# ASIMOV_OPT_SKIP_SIZE: Skip size calculation entirely (default: false)
+# ASIMOV_OPT_MMAP: Use in-memory hash for cache lookups (default: false)
+# =============================================================================
+
+readonly ASIMOV_ROOT="${ASIMOV_ROOT:-$HOME}"
+readonly ASIMOV_DRY_RUN="${ASIMOV_DRY_RUN:-false}"
+readonly ASIMOV_VERBOSE="${ASIMOV_VERBOSE:-false}"
+
+# Mode flags
+readonly ASIMOV_LIST_EXCLUSIONS="${ASIMOV_LIST_EXCLUSIONS:-false}"
+readonly ASIMOV_INIT_CACHE="${ASIMOV_INIT_CACHE:-false}"
+
+# Optimization flags
+readonly ASIMOV_OPT_CACHE="${ASIMOV_OPT_CACHE:-false}"
+readonly ASIMOV_OPT_INCREMENTAL="${ASIMOV_OPT_INCREMENTAL:-false}"
+readonly ASIMOV_OPT_INCREMENTAL_DAYS="${ASIMOV_OPT_INCREMENTAL_DAYS:-7}"
+readonly ASIMOV_OPT_PARALLEL="${ASIMOV_OPT_PARALLEL:-false}"
+readonly ASIMOV_OPT_PARALLEL_JOBS="${ASIMOV_OPT_PARALLEL_JOBS:-4}"
+readonly ASIMOV_OPT_GITIGNORE="${ASIMOV_OPT_GITIGNORE:-false}"
+readonly ASIMOV_OPT_DUST="${ASIMOV_OPT_DUST:-false}"
+readonly ASIMOV_OPT_SKIP_SIZE="${ASIMOV_OPT_SKIP_SIZE:-false}"
+readonly ASIMOV_OPT_MMAP="${ASIMOV_OPT_MMAP:-false}"
+
+# Cache file location
+readonly ASIMOV_CACHE_FILE="${ASIMOV_CACHE_FILE:-${HOME}/.cache/asimov-exclusions}"
+
+# =============================================================================
+# List Exclusions Mode - Uses mdfind for comprehensive listing
+# =============================================================================
+list_current_exclusions() {
+    print "\033[0;36mRetrieving current Time Machine exclusions...\033[0m\n"
+    
+    local root_filter="${ASIMOV_ROOT}"
+    local total_count
+    local filtered_count
+    
+    # Get all exclusions using mdfind (most comprehensive method)
+    # Note: sudo provides complete results, but works without for user-accessible paths
+    local all_exclusions
+    all_exclusions=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null)
+    
+    total_count=$(echo "$all_exclusions" | wc -l | tr -d ' ')
+    
+    print "\033[0;35mTotal Time Machine exclusions: $total_count\033[0m"
+    
+    if [[ -n "$root_filter" ]]; then
+        local filtered
+        filtered=$(echo "$all_exclusions" | grep "^$root_filter" 2>/dev/null)
+        filtered_count=$(echo "$filtered" | grep -c . 2>/dev/null || echo "0")
+        
+        print "\033[0;35mExclusions in $root_filter: $filtered_count\033[0m\n"
+        
+        if [[ "$ASIMOV_VERBOSE" == "true" ]]; then
+            # Show by type
+            local node_modules_count=$(echo "$filtered" | grep -c "node_modules" || true)
+            local target_count=$(echo "$filtered" | grep -c "/target$" || true)
+            local venv_count=$(echo "$filtered" | grep -cE "\.venv$|/venv$" || true)
+            local vendor_count=$(echo "$filtered" | grep -c "/vendor$" || true)
+            
+            print "  node_modules: $node_modules_count"
+            print "  target:       $target_count"
+            print "  .venv/venv:   $venv_count"
+            print "  vendor:       $vendor_count"
+            print ""
+        fi
+        
+        echo "$filtered"
+    else
+        echo "$all_exclusions"
+    fi
+}
+
+# =============================================================================
+# Initialize Cache Mode - Populate cache from current exclusions
+# =============================================================================
+init_cache_from_exclusions() {
+    print "\033[0;36mInitializing cache from current Time Machine exclusions...\033[0m\n"
+    
+    mkdir -p "${ASIMOV_CACHE_FILE:h}" 2>/dev/null || true
+    
+    # Get exclusions filtered by root
+    local exclusions
+    exclusions=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | grep "^$ASIMOV_ROOT" 2>/dev/null)
+    
+    local count=$(echo "$exclusions" | grep -c . 2>/dev/null || echo "0")
+    
+    # Write to cache file
+    echo "$exclusions" > "$ASIMOV_CACHE_FILE"
+    
+    print "\033[0;32mCache initialized with $count exclusions\033[0m"
+    print "Cache file: $ASIMOV_CACHE_FILE"
+}
+
+# Handle special modes before main execution
+if [[ "$ASIMOV_LIST_EXCLUSIONS" == "true" ]]; then
+    list_current_exclusions
+    exit 0
+fi
+
+if [[ "$ASIMOV_INIT_CACHE" == "true" ]]; then
+    init_cache_from_exclusions
+    exit 0
+fi
+
+# =============================================================================
+# Main Script Variables
+# =============================================================================
+
+# OPT 5: In-memory hash cache for O(1) lookups
+typeset -A MMAP_CACHE=()
+typeset -a MMAP_NEW_ENTRIES=()
+
+# Initialize cache
+if [[ "$ASIMOV_OPT_CACHE" == "true" ]]; then
+    mkdir -p "${ASIMOV_CACHE_FILE:h}" 2>/dev/null || true
+    touch "$ASIMOV_CACHE_FILE" 2>/dev/null || true
+    
+    # OPT 5: Load cache into memory for fast lookups
+    if [[ "$ASIMOV_OPT_MMAP" == "true" ]] && [[ -f "$ASIMOV_CACHE_FILE" ]]; then
+        while IFS= read -r cached_path; do
+            [[ -n "$cached_path" ]] && MMAP_CACHE[$cached_path]=1
+        done < "$ASIMOV_CACHE_FILE"
+        [[ "$ASIMOV_VERBOSE" == "true" ]] && print -- "Loaded ${#MMAP_CACHE[@]} entries into memory cache"
+    fi
+fi
+
+# Parallel job tracking
+typeset -a PARALLEL_PIDS=()
+
+# Paths to unconditionally skip over (configurable via env)
+typeset -a ASIMOV_SKIP_PATHS=()
+[[ "${ASIMOV_SKIP_TRASH:-true}" == "true" ]] && ASIMOV_SKIP_PATHS+=(~/.Trash)
+[[ "${ASIMOV_SKIP_LIBRARY:-true}" == "true" ]] && ASIMOV_SKIP_PATHS+=(~/Library)
+readonly -a ASIMOV_SKIP_PATHS
+
+# A list of "directory"/"sentinel" pairs.
+# Directories will only be excluded if the dependency ("sentinel") file exists.
+readonly -a ASIMOV_VENDOR_DIR_SENTINELS=(
+    '.build Package.swift'
+    '.gradle build.gradle'
+    '.gradle build.gradle.kts'
+    'build build.gradle'
+    'build build.gradle.kts'
+    '.dart_tool pubspec.yaml'
+    '.packages pubspec.yaml'
+    '.stack-work stack.yaml'
+    '.tox tox.ini'
+    '.nox noxfile.py'
+    '.vagrant Vagrantfile'
+    '.venv requirements.txt'
+    '.venv pyproject.toml'
+    'Carthage Cartfile'
+    'Pods Podfile'
+    'bower_components bower.json'
+    'build build.gradle'
+    'build build.gradle.kts'
+    'build pubspec.yaml'
+    'build setup.py'
+    'dist setup.py'
+    'node_modules package.json'
+    '.parcel-cache package.json'
+    'target Cargo.toml'
+    'target pom.xml'
+    'target build.sbt'
+    'target plugins.sbt'
+    'vendor composer.json'
+    'vendor Gemfile'
+    'vendor go.mod'
+    'venv requirements.txt'
+    'deps mix.exs'
+    '.build mix.exs'
+    '.terraform.d .terraformrc'
+    '.terragrunt-cache terragrunt.hcl'
+    'cdk.out cdk.json'
+)
+
+# Extract unique directory names to search for
+typeset -a VENDOR_DIRS
+typeset -A SENTINEL_MAP
+
+for pair in "${ASIMOV_VENDOR_DIR_SENTINELS[@]}"; do
+    # ZSH native word splitting
+    local dir_name="${pair%% *}"
+    local sentinel="${pair#* }"
+    
+    # Add to unique dirs list (use (I) instead of (r) to avoid unset error)
+    if (( ! ${VENDOR_DIRS[(I)$dir_name]} )); then
+        VENDOR_DIRS+=("$dir_name")
+    fi
+    
+    # Map: dir_name -> list of possible sentinels (space-separated)
+    if [[ -n "${SENTINEL_MAP[$dir_name]:-}" ]]; then
+        SENTINEL_MAP[$dir_name]+=" $sentinel"
+    else
+        SENTINEL_MAP[$dir_name]="$sentinel"
+    fi
+done
+
+# Build exclusion patterns for fd
+typeset -a FD_EXCLUDE_ARGS
+for skip in "${ASIMOV_SKIP_PATHS[@]}"; do
+    FD_EXCLUDE_ARGS+=(--exclude "${skip:t}")
+done
+
+# Check if path has any valid sentinel file
+has_sentinel() {
+    local dir_path="$1"
+    local dir_name="${dir_path:t}"
+    local parent_dir="${dir_path:h}"
+    local sentinels="${SENTINEL_MAP[$dir_name]}"
+    
+    # ZSH native: split sentinels and check each
+    for sentinel in ${(s: :)sentinels}; do
+        if [[ -e "$parent_dir/$sentinel" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# OPT 1 & 5: Check cache for already-excluded paths
+is_cached_exclusion() {
+    local dir_path="$1"
+    
+    if [[ "$ASIMOV_OPT_CACHE" != "true" ]]; then
+        return 1
+    fi
+    
+    # OPT 5: Use in-memory hash for O(1) lookup
+    if [[ "$ASIMOV_OPT_MMAP" == "true" ]]; then
+        if [[ -n "${MMAP_CACHE[$dir_path]:-}" ]]; then
+            [[ "$ASIMOV_VERBOSE" == "true" ]] && print -- "- $dir_path found in memory cache, skipping."
+            return 0
+        fi
+        return 1
+    fi
+    
+    # Fallback: grep file (slower, O(n))
+    if [[ -f "$ASIMOV_CACHE_FILE" ]] && grep -qF "$dir_path" "$ASIMOV_CACHE_FILE" 2>/dev/null; then
+        [[ "$ASIMOV_VERBOSE" == "true" ]] && print -- "- $dir_path found in file cache, skipping."
+        return 0
+    fi
+    return 1
+}
+
+# OPT 1 & 5: Add path to exclusion cache
+add_to_cache() {
+    local dir_path="$1"
+    
+    if [[ "$ASIMOV_OPT_CACHE" != "true" ]]; then
+        return
+    fi
+    
+    # OPT 5: Add to in-memory hash and batch for later write
+    if [[ "$ASIMOV_OPT_MMAP" == "true" ]]; then
+        MMAP_CACHE[$dir_path]=1
+        MMAP_NEW_ENTRIES+=("$dir_path")
+    else
+        # Direct file append (slower)
+        print -- "$dir_path" >> "$ASIMOV_CACHE_FILE"
+    fi
+}
+
+# OPT 5: Flush in-memory cache to disk (called at end)
+flush_mmap_cache() {
+    if [[ "$ASIMOV_OPT_MMAP" == "true" ]] && (( ${#MMAP_NEW_ENTRIES[@]} > 0 )); then
+        printf '%s\n' "${MMAP_NEW_ENTRIES[@]}" >> "$ASIMOV_CACHE_FILE"
+        [[ "$ASIMOV_VERBOSE" == "true" ]] && print -- "\nFlushed ${#MMAP_NEW_ENTRIES[@]} new entries to cache file"
+    fi
+}
+
+# OPT 6: Get directory size using configured method
+get_dir_size() {
+    local dir_path="$1"
+    
+    if [[ "$ASIMOV_OPT_SKIP_SIZE" == "true" ]]; then
+        print "N/A"
+        return
+    fi
+    
+    if [[ "$ASIMOV_OPT_DUST" == "true" ]] && command -v dust &>/dev/null; then
+        # Use dust for faster size calculation
+        dust -d 0 -b "$dir_path" 2>/dev/null | tail -1 | awk '{print $1}'
+    else
+        # Use du (default)
+        du -hs "$dir_path" 2>/dev/null | cut -f1
+    fi
+}
+
+# OPT 3: Wait for parallel jobs to complete
+wait_for_parallel_jobs() {
+    if [[ "$ASIMOV_OPT_PARALLEL" == "true" ]] && (( ${#PARALLEL_PIDS[@]} > 0 )); then
+        for pid in "${PARALLEL_PIDS[@]}"; do
+            wait "$pid" 2>/dev/null || true
+        done
+        PARALLEL_PIDS=()
+    fi
+}
+
+# OPT 3: Manage parallel job pool
+manage_parallel_pool() {
+    if [[ "$ASIMOV_OPT_PARALLEL" == "true" ]]; then
+        # Wait if we've hit the job limit
+        while (( ${#PARALLEL_PIDS[@]} >= ASIMOV_OPT_PARALLEL_JOBS )); do
+            # Remove completed jobs
+            typeset -a new_pids=()
+            for pid in "${PARALLEL_PIDS[@]}"; do
+                if kill -0 "$pid" 2>/dev/null; then
+                    new_pids+=("$pid")
+                fi
+            done
+            PARALLEL_PIDS=("${new_pids[@]}")
+            
+            if (( ${#PARALLEL_PIDS[@]} >= ASIMOV_OPT_PARALLEL_JOBS )); then
+                sleep 0.1
+            fi
+        done
+    fi
+}
+
+# Exclude the given path from Time Machine backups using ZSH builtins
+exclude_path() {
+    local dir_path="$1"
+    
+    # OPT 1: Check cache first
+    if is_cached_exclusion "$dir_path"; then
+        return
+    fi
+    
+    # Check if already excluded using ZSH pattern matching
+    local status_output
+    status_output=$(tmutil isexcluded "$dir_path" 2>/dev/null)
+    
+    if [[ "$status_output" == *"[Excluded]"* ]]; then
+        [[ "$ASIMOV_VERBOSE" == "true" ]] && print -- "- $dir_path is already excluded, skipping."
+        # OPT 1: Add to cache
+        add_to_cache "$dir_path"
+        return
+    fi
+    
+    # OPT 6: Get size using configured method
+    local sizeondisk
+    sizeondisk=$(get_dir_size "$dir_path")
+    
+    if [[ "$ASIMOV_DRY_RUN" == "true" ]]; then
+        print -- "[DRY-RUN] Would exclude: $dir_path ($sizeondisk)"
+    else
+        tmutil addexclusion "$dir_path"
+        print -- "- $dir_path has been excluded from Time Machine backups ($sizeondisk)."
+        # OPT 1: Add to cache
+        add_to_cache "$dir_path"
+    fi
+}
+
+# OPT 3: Parallel version of exclude_path
+exclude_path_parallel() {
+    local dir_path="$1"
+    
+    if [[ "$ASIMOV_OPT_PARALLEL" == "true" ]]; then
+        manage_parallel_pool
+        exclude_path "$dir_path" &
+        PARALLEL_PIDS+=($!)
+    else
+        exclude_path "$dir_path"
+    fi
+}
+
+# Print configuration status
+print_config() {
+    print "\n\033[0;36mFinding dependency directories in ${ASIMOV_ROOT}…\033[0m"
+    [[ "$ASIMOV_DRY_RUN" == "true" ]] && print "\033[0;33m[DRY-RUN MODE - no changes will be made]\033[0m"
+    
+    if [[ "$ASIMOV_VERBOSE" == "true" ]]; then
+        print "\033[0;35mOptimizations enabled:\033[0m"
+        [[ "$ASIMOV_OPT_CACHE" == "true" ]] && print "  - Caching (OPT 1): $ASIMOV_CACHE_FILE"
+        [[ "$ASIMOV_OPT_INCREMENTAL" == "true" ]] && print "  - Incremental scan (OPT 2): ${ASIMOV_OPT_INCREMENTAL_DAYS} days"
+        [[ "$ASIMOV_OPT_PARALLEL" == "true" ]] && print "  - Parallel tmutil (OPT 3): ${ASIMOV_OPT_PARALLEL_JOBS} jobs"
+        [[ "$ASIMOV_OPT_GITIGNORE" == "true" ]] && print "  - Gitignore awareness (OPT 4)"
+        [[ "$ASIMOV_OPT_MMAP" == "true" ]] && print "  - Memory-mapped cache (OPT 5): ${#MMAP_CACHE[@]} entries loaded"
+        [[ "$ASIMOV_OPT_DUST" == "true" ]] && print "  - Using dust for size (OPT 6)"
+        [[ "$ASIMOV_OPT_SKIP_SIZE" == "true" ]] && print "  - Skip size calculation (OPT 6)"
+    fi
+}
+
+print_config
+
+# Build fd regex pattern for directory names
+typeset fd_pattern
+fd_pattern="^(${(j:|:)VENDOR_DIRS})\$"
+
+# Build fd arguments based on optimizations
+typeset -a fd_args=(
+    --type d
+    --hidden
+)
+
+# OPT 4: Use gitignore awareness or not
+if [[ "$ASIMOV_OPT_GITIGNORE" != "true" ]]; then
+    fd_args+=(--no-ignore)
+fi
+
+# OPT 2: Incremental scanning
+if [[ "$ASIMOV_OPT_INCREMENTAL" == "true" ]]; then
+    fd_args+=(--changed-within "${ASIMOV_OPT_INCREMENTAL_DAYS}d")
+fi
+
+# Add exclusion patterns
+fd_args+=("${FD_EXCLUDE_ARGS[@]}")
+
+# Use fd for fast parallel search
+fd "${fd_args[@]}" "$fd_pattern" "$ASIMOV_ROOT" 2>/dev/null | while IFS= read -r found_path; do
+    if has_sentinel "$found_path"; then
+        exclude_path_parallel "$found_path"
+    fi
+done
+
+# OPT 3: Wait for all parallel jobs to complete
+wait_for_parallel_jobs
+
+# OPT 5: Flush in-memory cache to disk
+flush_mmap_cache
+
+# Print cache statistics if verbose and caching enabled
+if [[ "$ASIMOV_VERBOSE" == "true" ]] && [[ "$ASIMOV_OPT_CACHE" == "true" ]] && [[ -f "$ASIMOV_CACHE_FILE" ]]; then
+    local cache_count
+    cache_count=$(wc -l < "$ASIMOV_CACHE_FILE" | tr -d ' ')
+    print "\n\033[0;35mCache statistics: $cache_count entries in $ASIMOV_CACHE_FILE\033[0m"
+fi

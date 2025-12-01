@@ -1,12 +1,11 @@
 # Asimov
 
-> **Fork Notice:** This is a fork of [stevegrunwell/asimov](https://github.com/stevegrunwell/asimov), originally created by [Steve Grunwell](https://stevegrunwell.com). All credit for the original work goes to the original author. This fork is maintained by [Tobias Hochguerel](https://github.com/tobiashochguertel).
+> **Fork Notice:** This is a fork of [stevegrunwell/asimov](https://github.com/stevegrunwell/asimov), originally created by [Steve Grunwell](https://stevegrunwell.com). All credit for the original work goes to the original author. This fork is maintained by [Tobias Hochguertel](https://github.com/tobiashochguertel).
 
-[![Build Status](https://travis-ci.com/stevegrunwell/asimov.svg?branch=develop)](https://travis-ci.com/stevegrunwell/asimov)
 ![Requires macOS 10.13 (High Sierra) or newer](https://img.shields.io/badge/macOS-10.13%20or%20higher-blue)
 [![MIT license](https://img.shields.io/badge/license-MIT-green)](LICENSE.txt)
 
-> Those people who think they know everything are a great annoyance to those of us who do.<br>— Issac Asimov
+> Those people who think they know everything are a great annoyance to those of us who do.<br>— Isaac Asimov
 
 For macOS users, [Time Machine](https://support.apple.com/en-us/HT201250) is a no-frills, set-it-and-forget-it solution for on-site backups. Plug in an external hard drive (or configure a network storage drive), and your Mac's files are backed up.
 
@@ -14,50 +13,143 @@ For the average consumer, Time Machine is an excellent choice, especially consid
 
 Asimov aims to solve that problem, scanning your filesystem for known dependency directories (e.g. `node_modules/` living adjacent to a `package.json` file) and excluding them from Time Machine backups. After all, why eat up space on your backup drive for something you could easily restore via `npm install`?
 
+## Two Versions Available
+
+This fork provides two versions of Asimov:
+
+| Version | File | Shell | Performance | Dependencies |
+|---------|------|-------|-------------|--------------|
+| **Original** | `asimov` | Bash | Good | None (built-in tools) |
+| **Optimized** | `asimov-zsh` | ZSH | **2-3x faster** | `fd` (install via `brew install fd`) |
+
+### Why an Optimized ZSH Version?
+
+The optimized version (`asimov-zsh`) offers significant performance improvements:
+
+- **Parallel directory traversal** using `fd` (Rust-based, multi-threaded)
+- **In-memory caching** for O(1) exclusion lookups
+- **Native ZSH operations** instead of spawning subprocesses
+- **Configurable optimizations** via environment variables
+
+See [how-to-improve-the-performance-of-asimov.md](how-to-improve-the-performance-of-asimov.md) for detailed benchmarks and optimization strategies.
 
 ## Installation
 
-Asimov may be installed in a few different ways:
+### Prerequisites
 
-### Installation via Homebrew
-
-The easiest way to install Asimov is through [Homebrew](https://brew.sh):
+For the optimized ZSH version (recommended):
 
 ```sh
- brew install asimov
+# Install fd (required for asimov-zsh)
+brew install fd
+
+# Optional: Install tmux for background migration scan
+brew install tmux
 ```
 
-If you would prefer to use the latest development release, you may append the `--head` flag:
+### Quick Install (Recommended: ZSH Version)
 
 ```sh
- brew install asimov --head
+# Clone the repository
+git clone https://github.com/tobiashochguertel/asimov.git ~/asimov
+cd ~/asimov
+
+# Install the optimized ZSH version with all optimizations
+./install.sh --zsh
 ```
 
-Once installed, you may instruct Homebrew to automatically load the scheduled job, ensuring Asimov is being run automatically every day:
+### Migration from Homebrew Asimov
+
+If you previously installed asimov via Homebrew (`brew install asimov`), use our migration script:
 
 ```sh
- sudo brew services start asimov
+# Clone the repository
+git clone https://github.com/tobiashochguertel/asimov.git ~/asimov
+cd ~/asimov
+
+# Uninstall Homebrew version first
+brew uninstall asimov
+
+# Run migration (backs up exclusions, initializes cache, starts full scan in tmux)
+./migrate-to-asimov-zsh.zsh
 ```
 
-If you don't need or want the scheduled job, you may run Asimov on-demand:
+The migration script will:
+- Backup your current Time Machine exclusions
+- Initialize the cache from existing exclusions
+- Create a symlink to `/usr/local/bin/asimov`
+- Start a full home directory scan in a tmux session
+- Load the daily daemon
+
+See [Migration Guide](docs/MIGRATION-GUIDE.md) for detailed instructions.
+
+### Alternative: Original Bash Version
+
+If you prefer the original bash version (no additional dependencies):
 
 ```sh
- asimov
+git clone https://github.com/tobiashochguertel/asimov.git ~/asimov
+cd ~/asimov
+./install.sh
 ```
 
-### Manual installation
+### What the Install Script Does
 
-If you would prefer to install Asimov manually, you can do so by cloning the repository (or downloading and extracting an archive of the source) anywhere on your Mac:
+* Symlinks asimov to `/usr/local/bin/asimov`
+* Loads a launchd daemon to run asimov daily
+* Runs asimov for the first time
+
+## Usage
+
+### Basic Usage
 
 ```sh
- git clone https://github.com/tobiashochguertel/asimov.git --depth 1
+# Run asimov (whichever version is installed)
+asimov
 ```
 
-After you've cloned the repository, run the `install.sh` script to automatically:
-* Symlink Asimov to `/usr/local/bin`, making it readily available from anywhere.
-* Schedule Asimov to run once a day, ensuring new projects' dependencies are quickly excluded from Time Machine backups.
-* Run Asimov for the first time, finding all current project dependencies adding them to Time Machine's exclusion list.
+### Optimized ZSH Version Options
 
+The ZSH version supports many configuration options via environment variables:
+
+```sh
+# Scan a specific directory
+ASIMOV_ROOT=~/work-dev asimov
+
+# Dry run (show what would be excluded without actually excluding)
+ASIMOV_DRY_RUN=true asimov
+
+# Verbose output
+ASIMOV_VERBOSE=true asimov
+
+# List current Time Machine exclusions
+ASIMOV_LIST_EXCLUSIONS=true asimov
+
+# Initialize cache from current exclusions (faster subsequent runs)
+ASIMOV_INIT_CACHE=true asimov
+```
+
+### Performance Optimizations (ZSH Version)
+
+Enable optimizations for faster execution:
+
+```sh
+# Enable caching + in-memory lookups + skip size calculation
+ASIMOV_OPT_CACHE=true \
+ASIMOV_OPT_MMAP=true \
+ASIMOV_OPT_SKIP_SIZE=true \
+asimov
+```
+
+| Optimization | Environment Variable | Description |
+|--------------|---------------------|-------------|
+| Caching | `ASIMOV_OPT_CACHE=true` | Cache exclusion status to file |
+| Memory-mapped | `ASIMOV_OPT_MMAP=true` | Load cache into memory for O(1) lookups |
+| Incremental | `ASIMOV_OPT_INCREMENTAL=true` | Only scan recently modified directories |
+| Parallel | `ASIMOV_OPT_PARALLEL=true` | Run tmutil calls in parallel |
+| Gitignore | `ASIMOV_OPT_GITIGNORE=true` | Use fd's gitignore awareness |
+| Skip Size | `ASIMOV_OPT_SKIP_SIZE=true` | Skip directory size calculation |
+| Dust | `ASIMOV_OPT_DUST=true` | Use dust instead of du for size |
 
 ## How it works
 
@@ -67,16 +159,70 @@ Asimov finds recognized dependency directories, verifies that the corresponding 
 
 Don't worry about running it multiple times, either. Asimov is smart enough to see if a directory has already been marked for exclusion.
 
-### Retrieving excluded files
+### Supported Dependency Directories
 
-If you'd like to see all of the directories and files that have been excluded from Time Machine, you can do so by running the following command ([props Brant Bobby on StackOverflow](https://apple.stackexchange.com/a/25833/206772)):
+Asimov recognizes these dependency patterns:
+
+| Directory | Sentinel File | Language/Tool |
+|-----------|---------------|---------------|
+| `node_modules` | `package.json` | Node.js |
+| `vendor` | `composer.json` | PHP (Composer) |
+| `vendor` | `Gemfile` | Ruby (Bundler) |
+| `vendor` | `go.mod` | Go |
+| `.venv`, `venv` | `requirements.txt` | Python |
+| `target` | `Cargo.toml` | Rust |
+| `target` | `pom.xml` | Java (Maven) |
+| `.gradle`, `build` | `build.gradle` | Java (Gradle) |
+| `Pods` | `Podfile` | iOS (CocoaPods) |
+| `deps`, `.build` | `mix.exs` | Elixir |
+| And more... | | |
+
+### Retrieving Excluded Files
+
+If you'd like to see all of the directories and files that have been excluded from Time Machine, you can do so by running:
 
 ```bash
- sudo mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'"
+# Using mdfind (most comprehensive)
+sudo mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'"
+
+# Using the ZSH version's list mode
+ASIMOV_LIST_EXCLUSIONS=true ASIMOV_VERBOSE=true asimov
+
+# Check a specific path
+tmutil isexcluded /path/to/directory
 ```
 
 If a directory has been excluded from backups in error, you can remove the exclusion using `tmutil`:
 
 ```bash
- tmutil removeexclusion /path/to/directory
+tmutil removeexclusion /path/to/directory
 ```
+
+## Benchmarking
+
+The repository includes a benchmark script to compare performance:
+
+```sh
+# Basic benchmark (bash vs zsh)
+./benchmark-asimov.zsh --mode basic --root ~/work-dev --runs 5
+
+# Benchmark optimization combinations
+./benchmark-asimov.zsh --mode optimizations --root ~/work-dev --runs 5
+
+# Run all benchmarks
+./benchmark-asimov.zsh --mode all --root ~/work-dev --runs 5
+```
+
+## Documentation
+
+- **[User Guide](docs/USER-GUIDE.md)** - How to use and maintain asimov over time
+- **[Migration Guide](docs/MIGRATION-GUIDE.md)** - Migrating from original asimov to the ZSH version
+- **[Performance Guide](how-to-improve-the-performance-of-asimov.md)** - Detailed optimization strategies and benchmarks
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+MIT License - see [LICENSE.txt](LICENSE.txt) for details.

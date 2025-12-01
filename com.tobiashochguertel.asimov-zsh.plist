@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+        <key>Label</key>
+        <string>com.tobiashochguertel.asimov-zsh</string>
+        <key>Program</key>
+        <string>/usr/local/bin/asimov</string>
+        <key>StartInterval</key>
+        <!-- 24 hours = 60 * 60 * 24 -->
+        <integer>86400</integer>
+        <key>EnvironmentVariables</key>
+        <dict>
+            <!-- Enable caching for faster subsequent runs -->
+            <key>ASIMOV_OPT_CACHE</key>
+            <string>true</string>
+            <!-- Use in-memory hash for O(1) lookups -->
+            <key>ASIMOV_OPT_MMAP</key>
+            <string>true</string>
+            <!-- Skip size calculation for speed -->
+            <key>ASIMOV_OPT_SKIP_SIZE</key>
+            <string>true</string>
+        </dict>
+    </dict>
+</plist>

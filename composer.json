@@ -1,7 +1,15 @@
 {
     "name": "tobiashochguertel/asimov",
-    "description": "Automatically exclude development dependencies from Apple Time Machine backups (Fork of stevegrunwell/asimov)",
+    "description": "Automatically exclude development dependencies from Apple Time Machine backups (Fork of stevegrunwell/asimov with optimized ZSH version)",
     "type": "project",
+    "keywords": [
+        "macos",
+        "time-machine",
+        "backup",
+        "node_modules",
+        "developer-tools",
+        "tmutil"
+    ],
     "authors": [
         {
             "name": "Steve Grunwell",
@@ -37,10 +45,12 @@
         }
     },
     "scripts": {
-      "test": "sh tests/bin/run-tests.sh"
+      "test": "sh tests/bin/run-tests.sh",
+      "test:zsh": "zsh -n asimov-zsh && ASIMOV_DRY_RUN=true ./asimov-zsh"
     },
     "scripts-descriptions": {
-      "test": "Run the automated tests for Asimov."
+      "test": "Run the automated tests for Asimov (bash version).",
+      "test:zsh": "Run syntax check and dry-run test for asimov-zsh."
     },
     "config": {
         "preferred-install": "dist",

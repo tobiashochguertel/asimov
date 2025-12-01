@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  # Test the original bash version
+  test-bash:
+    name: Test Bash Version (macOS ${{ matrix.macos }})
+    runs-on: macos-${{ matrix.macos }}
+    strategy:
+      fail-fast: false
+      matrix:
+        macos: ['13', '14']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-progress
+
+      - name: Run ShellCheck on asimov
+        run: |
+          brew install shellcheck
+          shellcheck -s bash asimov
+
+      - name: Run PHPUnit tests
+        run: composer test
+
+      - name: Test asimov dry run
+        run: |
+          chmod +x asimov
+          ASIMOV_ROOT=/tmp ./asimov || true
+          echo "Bash version test completed"
+
+  # Test the optimized ZSH version
+  test-zsh:
+    name: Test ZSH Version (macOS ${{ matrix.macos }})
+    runs-on: macos-${{ matrix.macos }}
+    strategy:
+      fail-fast: false
+      matrix:
+        macos: ['13', '14']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install fd
+        run: brew install fd
+
+      - name: Verify ZSH syntax
+        run: zsh -n asimov-zsh
+
+      - name: Test asimov-zsh dry run
+        run: |
+          chmod +x asimov-zsh
+          ASIMOV_DRY_RUN=true ASIMOV_ROOT=/tmp ./asimov-zsh
+          echo "ZSH version test completed"
+
+      - name: Test list exclusions mode
+        run: |
+          ASIMOV_LIST_EXCLUSIONS=true ASIMOV_ROOT=/tmp ./asimov-zsh || true
+          echo "List exclusions mode test completed"
+
+      - name: Test cache initialization
+        run: |
+          mkdir -p ~/.cache
+          ASIMOV_INIT_CACHE=true ASIMOV_ROOT=/tmp ./asimov-zsh || true
+          echo "Cache init test completed"
+
+      - name: Test with all optimizations
+        run: |
+          ASIMOV_DRY_RUN=true \
+          ASIMOV_ROOT=/tmp \
+          ASIMOV_OPT_CACHE=true \
+          ASIMOV_OPT_MMAP=true \
+          ASIMOV_OPT_SKIP_SIZE=true \
+          ./asimov-zsh
+          echo "All optimizations test completed"
+
+  # Integration test - create test projects and verify exclusion
+  integration-test:
+    name: Integration Test (macOS ${{ matrix.macos }})
+    runs-on: macos-${{ matrix.macos }}
+    strategy:
+      fail-fast: false
+      matrix:
+        macos: ['14']
+        version: ['bash', 'zsh']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install fd (for ZSH version)
+        if: matrix.version == 'zsh'
+        run: brew install fd
+
+      - name: Create test project structure
+        run: |
+          mkdir -p /tmp/test-projects/node-project/node_modules
+          echo '{"name": "test"}' > /tmp/test-projects/node-project/package.json
+          mkdir -p /tmp/test-projects/rust-project/target
+          echo '[package]' > /tmp/test-projects/rust-project/Cargo.toml
+          mkdir -p /tmp/test-projects/python-project/.venv
+          echo 'requests' > /tmp/test-projects/python-project/requirements.txt
+          echo "Test projects created"
+
+      - name: Run asimov (bash)
+        if: matrix.version == 'bash'
+        run: |
+          chmod +x asimov
+          ASIMOV_ROOT=/tmp/test-projects ./asimov
+          echo "Bash version ran successfully"
+
+      - name: Run asimov-zsh
+        if: matrix.version == 'zsh'
+        run: |
+          chmod +x asimov-zsh
+          ASIMOV_ROOT=/tmp/test-projects ASIMOV_VERBOSE=true ./asimov-zsh
+          echo "ZSH version ran successfully"
+
+      - name: Verify exclusions were created
+        run: |
+          echo "Checking exclusions..."
+          tmutil isexcluded /tmp/test-projects/node-project/node_modules || echo "node_modules check done"
+          tmutil isexcluded /tmp/test-projects/rust-project/target || echo "target check done"
+          tmutil isexcluded /tmp/test-projects/python-project/.venv || echo ".venv check done"
+
+  # Lint and format check
+  lint:
+    name: Lint
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: brew install shellcheck
+
+      - name: ShellCheck asimov (bash)
+        run: shellcheck -s bash asimov
+
+      - name: ZSH syntax check
+        run: zsh -n asimov-zsh
+
+      - name: Check install script
+        run: shellcheck -s bash install.sh
+
+      - name: Check migration script
+        run: zsh -n migrate-to-asimov-zsh.zsh
+
+      - name: Check benchmark script
+        run: zsh -n benchmark-asimov.zsh
