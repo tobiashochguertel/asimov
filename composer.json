@@ -1,20 +1,28 @@
 {
-    "name": "stevegrunwell/asimov",
-    "description": "Automatically exclude development dependencies from Apple Time Machine backups",
+    "name": "tobiashochguertel/asimov",
+    "description": "Automatically exclude development dependencies from Apple Time Machine backups (Fork of stevegrunwell/asimov)",
     "type": "project",
     "authors": [
         {
             "name": "Steve Grunwell",
-            "homepage": "https://stevegrunwell.com"
+            "homepage": "https://stevegrunwell.com",
+            "role": "Original Author"
         },
         {
             "name": "Sudar Muthu",
-            "homepage": "https://sudarmuthu.com"
+            "homepage": "https://sudarmuthu.com",
+            "role": "Original Contributor"
+        },
+        {
+            "name": "Tobias Hochguerel",
+            "email": "tobias.hochguertel@googlemail.com",
+            "homepage": "https://github.com/tobiashochguertel",
+            "role": "Fork Maintainer"
         }
     ],
     "support": {
-        "source": "https://github.com/stevegrunwell/asimov",
-        "issues": "https://github.com/stevegrunwell/asimov/issues"
+        "source": "https://github.com/tobiashochguertel/asimov",
+        "issues": "https://github.com/tobiashochguertel/asimov/issues"
     },
     "license": "MIT",
     "require": {

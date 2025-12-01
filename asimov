@@ -14,7 +14,8 @@ set -Eeu -o pipefail
 # For a full explanation, please see https://apple.stackexchange.com/a/25833/206772
 #
 # @version 0.3.0
-# @author  Steve Grunwell
+# @author  Steve Grunwell (Original Author)
+# @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
 
 readonly ASIMOV_ROOT=~

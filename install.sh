@@ -2,7 +2,8 @@
 
 # Install Asimov as a launchd daemon.
 #
-# @author  Steve Grunwell
+# @author  Steve Grunwell (Original Author)
+# @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
 
 DIR="$(cd "$(dirname "$0")" || return; pwd -P)"

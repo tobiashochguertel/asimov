@@ -1,5 +1,7 @@
 # Asimov Change Log
 
+> **Fork Notice:** This is a fork of [stevegrunwell/asimov](https://github.com/stevegrunwell/asimov). The changelog below includes the original project's history. This fork is maintained by [Tobias Hochguerel](https://github.com/tobiashochguertel).
+
 All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](http://semver.org/).

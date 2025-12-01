@@ -1,5 +1,6 @@
 # Asimov
 
+> **Fork Notice:** This is a fork of [stevegrunwell/asimov](https://github.com/stevegrunwell/asimov), originally created by [Steve Grunwell](https://stevegrunwell.com). All credit for the original work goes to the original author. This fork is maintained by [Tobias Hochguerel](https://github.com/tobiashochguertel).
 
 [![Build Status](https://travis-ci.com/stevegrunwell/asimov.svg?branch=develop)](https://travis-ci.com/stevegrunwell/asimov)
 ![Requires macOS 10.13 (High Sierra) or newer](https://img.shields.io/badge/macOS-10.13%20or%20higher-blue)
@@ -49,7 +50,7 @@ If you don't need or want the scheduled job, you may run Asimov on-demand:
 If you would prefer to install Asimov manually, you can do so by cloning the repository (or downloading and extracting an archive of the source) anywhere on your Mac:
 
 ```sh
- git clone https://github.com/stevegrunwell/asimov.git --depth 1
+ git clone https://github.com/tobiashochguertel/asimov.git --depth 1
 ```
 
 After you've cloned the repository, run the `install.sh` script to automatically:
