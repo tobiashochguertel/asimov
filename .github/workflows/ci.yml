@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        macos: ['13', '14']
+        macos: ['14', '15']
     
     steps:
       - name: Checkout code
@@ -28,7 +28,10 @@ jobs:
           tools: composer
 
       - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-progress
+        run: |
+          # Remove lock file if exists to avoid version conflicts
+          rm -f composer.lock
+          composer update --prefer-dist --no-progress
 
       - name: Run ShellCheck on asimov
         run: |
@@ -51,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        macos: ['13', '14']
+        macos: ['14', '15']
     
     steps:
       - name: Checkout code
