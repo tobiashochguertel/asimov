@@ -18,62 +18,13 @@ This document outlines strategies and optimizations to improve the performance o
 | 10 | Memory-Mapped File Operations (In-Memory Hash) | ✅ Done | `ASIMOV_OPT_MMAP` with `MMAP_CACHE`                           |
 | 11 | Alternative to `du` (dust)                     | ✅ Done | `ASIMOV_OPT_DUST` flag                                        |
 | 12 | Configuration Refactoring                      | ✅ Done | `ASIMOV_CONFIG` associative array with sensible defaults      |
-| 13 | Service Status & Monitoring                    | ❌ Open | `asimov --status` for launchd service info                    |
+| 13 | Service Status & Monitoring                    | ✅ Done | `ASIMOV_STATUS=true` for launchd service info                 |
 | 14 | Logging System                                 | ❌ Open | Text and JSON logging with `ASIMOV_LOG_FILE`                  |
 | 15 | SQLite Cache                                   | ❌ Open | Not implemented (recommended for 100,000+ exclusions)         |
 
 ## Open
 
 The following improvements are not yet implemented in `asimov-zsh`:
-
-### Service Status and Monitoring
-
-Add a status command to check the running state of the `asimov-zsh` launchd service, view recent activity, and monitor performance.
-
-**Proposed implementation:**
-
-```zsh
-# New mode: ASIMOV_STATUS=true ./asimov-zsh
-# Or: asimov --status
-
-asimov --status
-# Output:
-# ╔═══════════════════════════════════════════════════════════════╗
-# ║                    Asimov-ZSH Status                          ║
-# ╠═══════════════════════════════════════════════════════════════╣
-# ║  Service:     com.tobiashochguertel.asimov-zsh                ║
-# ║  Status:      Running (PID 12345)                             ║
-# ║  Last Run:    2025-12-03 10:15:23 (4 hours ago)               ║
-# ║  Next Run:    2025-12-04 10:15:23 (in 20 hours)               ║
-# ║                                                                ║
-# ║  Statistics:                                                   ║
-# ║    Total exclusions:      1,234                                ║
-# ║    Cache entries:         1,100                                ║
-# ║    Last scan duration:    45.2s                                ║
-# ║    Directories scanned:   15,678                               ║
-# ║                                                                ║
-# ║  Recent Exclusions (last 10):                                  ║
-# ║    ~/work/project-a/node_modules                               ║
-# ║    ~/work/project-b/target                                     ║
-# ║    ~/work/project-c/.venv                                      ║
-# ║    ...                                                         ║
-# ╚═══════════════════════════════════════════════════════════════╝
-```
-
-**Features:**
-
-- Show launchd service status (running/stopped/error)
-- Display last execution time and next scheduled run
-- Show total exclusions and cache statistics
-- List most recent exclusions discovered
-- Display scan duration and performance metrics
-
-**Implementation approach:**
-
-- Store run metadata in `~/.cache/asimov-status.json`
-- Query launchd for service status: `launchctl list | grep asimov`
-- Read plist for schedule information
-- Parse cache file for statistics
 
 ### Logging System
 
@@ -178,6 +129,41 @@ Benefits:
 ## Done
 
 The following improvements have been implemented in `asimov-zsh`:
+
+### Service Status and Monitoring
+
+Added a status command to check the running state of the `asimov-zsh` launchd service, view recent activity, and monitor performance.
+
+**Implementation**: `ASIMOV_STATUS=true ./asimov-zsh` or set the environment variable.
+
+```
+╔═══════════════════════════════════════════════════════════════╗
+║                    Asimov-ZSH Status                          ║
+╠═══════════════════════════════════════════════════════════════╣
+║  Service:     com.tobiashochguertel.asimov-zsh                ║
+║  Status:      Loaded (Last exit: success)                     ║
+║  Schedule:    Every 24 hours                                  ║
+║  Last Run:    2025-12-03T14:30:00 (2 hours ago)               ║
+║                                                                ║
+║  Statistics:                                                   ║
+║    Total TM exclusions:    1,234                               ║
+║    Cache entries:          1,100                               ║
+║    Last scan duration:     45s                                 ║
+║                                                                ║
+║  Recent Exclusions (last 5):                                   ║
+║    ~/work/project-a/node_modules                               ║
+║    ~/work/project-b/target                                     ║
+║    ...                                                         ║
+╚═══════════════════════════════════════════════════════════════╝
+```
+
+Features:
+
+- **Service status** - Shows launchd service state (loaded/not loaded)
+- **Schedule info** - Reads StartInterval from plist
+- **Last run time** - Stored in `~/.cache/asimov-status.json`
+- **Statistics** - Total exclusions, cache entries, scan duration
+- **Recent exclusions** - Last 5 entries from cache file
 
 ### Configuration Refactoring to Associative Array
 

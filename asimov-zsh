@@ -12,7 +12,7 @@
 # - ZSH native string manipulation instead of external cut/grep
 # - Uses zsh/stat module for faster file operations
 #
-# @version 0.7.0
+# @version 0.8.0
 # @author  Steve Grunwell (Original Author)
 # @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
@@ -62,6 +62,7 @@ typeset -A ASIMOV_CONFIG=(
     [verbose]="${ASIMOV_VERBOSE:-false}"
     [list_exclusions]="${ASIMOV_LIST_EXCLUSIONS:-false}"
     [init_cache]="${ASIMOV_INIT_CACHE:-false}"
+    [status]="${ASIMOV_STATUS:-false}"
     [opt_cache]="${ASIMOV_OPT_CACHE:-false}"
     [opt_cache_file]="${ASIMOV_CACHE_FILE:-${HOME}/.cache/asimov-exclusions}"
     [opt_incremental]="${ASIMOV_OPT_INCREMENTAL:-false}"
@@ -74,6 +75,7 @@ typeset -A ASIMOV_CONFIG=(
     [opt_mmap]="${ASIMOV_OPT_MMAP:-false}"
     [opt_batch]="${ASIMOV_OPT_BATCH:-false}"
     [opt_batch_size]="${ASIMOV_OPT_BATCH_SIZE:-50}"
+    [status_file]="${ASIMOV_STATUS_FILE:-${HOME}/.cache/asimov-status.json}"
 )
 
 # =============================================================================
@@ -143,6 +145,162 @@ init_cache_from_exclusions() {
     print "Cache file: ${ASIMOV_CONFIG[opt_cache_file]}"
 }
 
+# =============================================================================
+# Service Status Mode - Show launchd service info and statistics
+# =============================================================================
+show_service_status() {
+    local service_name="com.tobiashochguertel.asimov-zsh"
+    local plist_file="${HOME}/Library/LaunchAgents/${service_name}.plist"
+    local status_file="${ASIMOV_CONFIG[status_file]}"
+    local cache_file="${ASIMOV_CONFIG[opt_cache_file]}"
+    
+    # Colors
+    local GREEN='\033[0;32m'
+    local RED='\033[0;31m'
+    local YELLOW='\033[0;33m'
+    local CYAN='\033[0;36m'
+    local NC='\033[0m'
+    
+    print "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
+    print "${CYAN}║                    Asimov-ZSH Status                          ║${NC}"
+    print "${CYAN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+    
+    # Check launchd service status
+    local service_status="Not Loaded"
+    local status_color="${RED}"
+    
+    if launchctl list 2>/dev/null | grep -q "$service_name"; then
+        local launchctl_info=$(launchctl list "$service_name" 2>/dev/null)
+        # Parse the plist-style output from launchctl
+        local exit_status=$(echo "$launchctl_info" | grep -o '"LastExitStatus" = [0-9]*' | awk -F'= ' '{print $2}' | tr -d ';' 2>/dev/null)
+        
+        if [[ "$exit_status" == "0" ]] || [[ -z "$exit_status" ]]; then
+            service_status="Loaded (Last exit: success)"
+            status_color="${GREEN}"
+        else
+            service_status="Loaded (Last exit: $exit_status)"
+            status_color="${YELLOW}"
+        fi
+    fi
+    
+    printf "${CYAN}║${NC}  Service:     %-47s${CYAN}║${NC}\n" "$service_name"
+    printf "${CYAN}║${NC}  Status:      ${status_color}%-47s${NC}${CYAN}║${NC}\n" "$service_status"
+    
+    # Check plist for schedule
+    local schedule_info="Unknown"
+    if [[ -f "$plist_file" ]]; then
+        local interval=$(defaults read "$plist_file" StartInterval 2>/dev/null || echo "")
+        if [[ -n "$interval" ]]; then
+            local hours=$((interval / 3600))
+            schedule_info="Every ${hours} hours"
+        fi
+    fi
+    printf "${CYAN}║${NC}  Schedule:    %-47s${CYAN}║${NC}\n" "$schedule_info"
+    
+    # Read status file for last run info
+    local last_run="Never"
+    local last_duration="N/A"
+    local dirs_scanned="N/A"
+    local dirs_excluded="N/A"
+    
+    if [[ -f "$status_file" ]]; then
+        # Try to parse JSON status file
+        if command -v jq &>/dev/null; then
+            last_run=$(jq -r '.last_run // "Never"' "$status_file" 2>/dev/null || echo "Never")
+            last_duration=$(jq -r '.duration_sec // "N/A"' "$status_file" 2>/dev/null || echo "N/A")
+            dirs_scanned=$(jq -r '.dirs_scanned // "N/A"' "$status_file" 2>/dev/null || echo "N/A")
+            dirs_excluded=$(jq -r '.dirs_excluded // "N/A"' "$status_file" 2>/dev/null || echo "N/A")
+        else
+            # Fallback: simple grep parsing
+            last_run=$(grep -o '"last_run":"[^"]*"' "$status_file" 2>/dev/null | cut -d'"' -f4 || echo "Never")
+        fi
+    fi
+    
+    # Calculate relative time
+    local relative_time=""
+    if [[ "$last_run" != "Never" ]] && [[ "$last_run" != "null" ]]; then
+        local last_ts=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${last_run%%+*}" +%s 2>/dev/null || echo "0")
+        local now_ts=$(date +%s)
+        if [[ "$last_ts" -gt 0 ]]; then
+            local diff=$((now_ts - last_ts))
+            if [[ $diff -lt 3600 ]]; then
+                relative_time="($(($diff / 60)) min ago)"
+            elif [[ $diff -lt 86400 ]]; then
+                relative_time="($(($diff / 3600)) hours ago)"
+            else
+                relative_time="($(($diff / 86400)) days ago)"
+            fi
+        fi
+    fi
+    
+    printf "${CYAN}║${NC}  Last Run:    %-47s${CYAN}║${NC}\n" "${last_run} ${relative_time}"
+    
+    print "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
+    print "${CYAN}║${NC}  ${YELLOW}Statistics:${NC}                                                  ${CYAN}║${NC}"
+    
+    # Get total exclusions from mdfind
+    local total_exclusions=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | wc -l | tr -d ' ')
+    printf "${CYAN}║${NC}    Total TM exclusions:    %-35s${CYAN}║${NC}\n" "$total_exclusions"
+    
+    # Get cache entries
+    local cache_entries="0"
+    if [[ -f "$cache_file" ]]; then
+        cache_entries=$(wc -l < "$cache_file" 2>/dev/null | tr -d ' ')
+    fi
+    printf "${CYAN}║${NC}    Cache entries:          %-35s${CYAN}║${NC}\n" "$cache_entries"
+    
+    if [[ "$last_duration" != "N/A" ]] && [[ "$last_duration" != "null" ]]; then
+        printf "${CYAN}║${NC}    Last scan duration:     %-35s${CYAN}║${NC}\n" "${last_duration}s"
+    fi
+    if [[ "$dirs_scanned" != "N/A" ]] && [[ "$dirs_scanned" != "null" ]]; then
+        printf "${CYAN}║${NC}    Directories scanned:    %-35s${CYAN}║${NC}\n" "$dirs_scanned"
+    fi
+    if [[ "$dirs_excluded" != "N/A" ]] && [[ "$dirs_excluded" != "null" ]]; then
+        printf "${CYAN}║${NC}    Directories excluded:   %-35s${CYAN}║${NC}\n" "$dirs_excluded"
+    fi
+    
+    # Show recent exclusions from cache
+    print "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
+    print "${CYAN}║${NC}  ${YELLOW}Recent Exclusions (last 5):${NC}                                  ${CYAN}║${NC}"
+    
+    if [[ -f "$cache_file" ]]; then
+        tail -5 "$cache_file" 2>/dev/null | while read -r path; do
+            # Truncate path if too long
+            if [[ ${#path} -gt 55 ]]; then
+                path="...${path: -52}"
+            fi
+            printf "${CYAN}║${NC}    %-57s${CYAN}║${NC}\n" "$path"
+        done
+    else
+        printf "${CYAN}║${NC}    %-57s${CYAN}║${NC}\n" "(no cache file found)"
+    fi
+    
+    print "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+}
+
+# Save run status to JSON file (called at end of scan)
+save_run_status() {
+    local dirs_scanned="$1"
+    local dirs_excluded="$2"
+    local duration="$3"
+    local status_file="${ASIMOV_CONFIG[status_file]}"
+    
+    mkdir -p "${status_file:h}" 2>/dev/null || true
+    
+    local timestamp=$(date -Iseconds)
+    
+    cat > "$status_file" << EOF
+{
+  "last_run": "$timestamp",
+  "dirs_scanned": $dirs_scanned,
+  "dirs_excluded": $dirs_excluded,
+  "duration_sec": $duration,
+  "root": "${ASIMOV_CONFIG[root]}",
+  "version": "0.8.0"
+}
+EOF
+}
+
 # Handle special modes before main execution
 if [[ "${ASIMOV_CONFIG[list_exclusions]}" == "true" ]]; then
     list_current_exclusions
@@ -151,6 +309,11 @@ fi
 
 if [[ "${ASIMOV_CONFIG[init_cache]}" == "true" ]]; then
     init_cache_from_exclusions
+    exit 0
+fi
+
+if [[ "${ASIMOV_CONFIG[status]}" == "true" ]]; then
+    show_service_status
     exit 0
 fi
 
@@ -556,6 +719,13 @@ print_config() {
 
 print_config
 
+# =============================================================================
+# Run Statistics Tracking
+# =============================================================================
+typeset -i SCAN_START_TIME=$(date +%s)
+typeset -i SCAN_DIRS_FOUND=0
+typeset -i SCAN_DIRS_EXCLUDED=0
+
 # Build fd regex pattern for directory names
 typeset fd_pattern
 fd_pattern="^(${(j:|:)VENDOR_DIRS})\$"
@@ -591,6 +761,8 @@ if [[ "${ASIMOV_CONFIG[opt_batch]}" == "true" ]]; then
         fi
     done < <(fd "${fd_args[@]}" "$fd_pattern" "${ASIMOV_CONFIG[root]}" 2>/dev/null)
     
+    SCAN_DIRS_FOUND=${#all_valid_paths[@]}
+    
     # Process paths in batches
     for path in "${all_valid_paths[@]}"; do
         batch_paths+=("$path")
@@ -610,6 +782,7 @@ else
     # Non-batch mode: process paths individually (original behavior)
     fd "${fd_args[@]}" "$fd_pattern" "${ASIMOV_CONFIG[root]}" 2>/dev/null | while IFS= read -r found_path; do
         if has_sentinel "$found_path"; then
+            ((SCAN_DIRS_FOUND++)) || true
             exclude_path_parallel "$found_path"
         fi
     done
@@ -621,9 +794,24 @@ fi
 # OPT 5: Flush in-memory cache to disk
 flush_mmap_cache
 
+# Calculate scan duration and save status
+typeset -i SCAN_END_TIME=$(date +%s)
+typeset -i SCAN_DURATION=$((SCAN_END_TIME - SCAN_START_TIME))
+
+# Count excluded dirs from new cache entries
+if [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]]; then
+    SCAN_DIRS_EXCLUDED=${#MMAP_NEW_ENTRIES[@]}
+fi
+
+# Save run status for --status command
+if [[ "${ASIMOV_CONFIG[dry_run]}" != "true" ]]; then
+    save_run_status "$SCAN_DIRS_FOUND" "$SCAN_DIRS_EXCLUDED" "$SCAN_DURATION"
+fi
+
 # Print cache statistics if verbose and caching enabled
 if [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && [[ "${ASIMOV_CONFIG[opt_cache]}" == "true" ]] && [[ -f "${ASIMOV_CONFIG[opt_cache_file]}" ]]; then
     local cache_count
     cache_count=$(wc -l < "${ASIMOV_CONFIG[opt_cache_file]}" | tr -d ' ')
     print "\n\033[0;35mCache statistics: $cache_count entries in ${ASIMOV_CONFIG[opt_cache_file]}\033[0m"
+    print "\033[0;35mScan completed in ${SCAN_DURATION}s (${SCAN_DIRS_FOUND} dirs found, ${SCAN_DIRS_EXCLUDED} newly excluded)\033[0m"
 fi
