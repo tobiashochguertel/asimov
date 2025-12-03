@@ -20,33 +20,54 @@ This document outlines strategies and optimizations to improve the performance o
 | 12 | Configuration Refactoring                      | ✅ Done | `ASIMOV_CONFIG` associative array with sensible defaults      |
 | 13 | Service Status & Monitoring                    | ✅ Done | `ASIMOV_STATUS=true` for launchd service info                 |
 | 14 | Logging System                                 | ✅ Done | Text and JSON logging with `ASIMOV_LOG_FILE`                  |
-| 15 | SQLite Cache                                   | ❌ Open | Not implemented (recommended for 100,000+ exclusions)         |
+| 15 | SQLite Cache                                   | ✅ Done | `ASIMOV_OPT_SQLITE` with `ASIMOV_SQLITE_DB`               |
 | 16 | Color System Refactoring                       | ✅ Done | Global COLORS hash-map, NO_COLOR support, no colors in logs   |
-
-## Open
-
-The following improvements are not yet implemented in `asimov-zsh`:
-
-### SQLite Cache
-
-For very large exclusion lists (100,000+), consider using SQLite:
-
-```zsh
-# Using sqlite3 CLI (available on macOS by default)
-sqlite3 ~/.cache/asimov.db "CREATE TABLE IF NOT EXISTS exclusions (path TEXT PRIMARY KEY)"
-sqlite3 ~/.cache/asimov.db "SELECT 1 FROM exclusions WHERE path='$dir_path' LIMIT 1"
-sqlite3 ~/.cache/asimov.db "INSERT OR IGNORE INTO exclusions VALUES ('$dir_path')"
-```
-
-Benefits:
-
-- **Indexed lookups** - O(log n) instead of O(n)
-- **ACID transactions** - Safe concurrent access
-- **Compression** - SQLite compresses data automatically
 
 ## Done
 
 The following improvements have been implemented in `asimov-zsh`:
+
+### SQLite Cache
+
+For very large exclusion lists (100,000+), SQLite provides indexed lookups and safe concurrent access.
+
+**Configuration:**
+
+```zsh
+ASIMOV_OPT_CACHE=true
+ASIMOV_OPT_SQLITE=true
+ASIMOV_SQLITE_DB=~/.cache/asimov.db  # default location
+```
+
+**How it works:**
+
+```zsh
+# Initialize from current Time Machine exclusions
+ASIMOV_INIT_CACHE=true ASIMOV_OPT_SQLITE=true ./asimov-zsh
+
+# Run with SQLite caching
+ASIMOV_OPT_CACHE=true ASIMOV_OPT_SQLITE=true ./asimov-zsh
+```
+
+**Implementation:**
+
+- Creates SQLite database with indexed `path` column
+- Uses batched transactions for efficient writes
+- Single-query lookups: `SELECT 1 FROM exclusions WHERE path='...' LIMIT 1`
+- Proper SQL escaping for paths with single quotes
+
+Benefits:
+
+- **Indexed lookups** - O(log n) instead of O(n) grep
+- **ACID transactions** - Safe concurrent access from multiple processes
+- **Compression** - SQLite compresses data automatically
+- **Batched writes** - Reduces transaction overhead
+
+When to use:
+
+- 100,000+ exclusion entries
+- Concurrent access from multiple asimov instances
+- Systems with slow file I/O
 
 ### Service Status and Monitoring
 

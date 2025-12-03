@@ -11,23 +11,40 @@
         <integer>86400</integer>
         <key>EnvironmentVariables</key>
         <dict>
+            <!-- 
+                Note: ~ is expanded to $HOME by asimov-zsh script.
+                launchd does NOT expand ~ or $HOME in environment variables.
+            -->
+            
             <!-- Enable caching for faster subsequent runs -->
             <key>ASIMOV_OPT_CACHE</key>
             <string>true</string>
-            <!-- Use in-memory hash for O(1) lookups -->
-            <key>ASIMOV_OPT_MMAP</key>
+            
+            <!-- Use SQLite for O(log n) indexed lookups (recommended for 100,000+ exclusions) -->
+            <key>ASIMOV_OPT_SQLITE</key>
             <string>true</string>
+            <key>ASIMOV_SQLITE_DB</key>
+            <string>~/.cache/asimov.db</string>
+            
             <!-- Enable batch operations for better performance -->
             <key>ASIMOV_OPT_BATCH</key>
             <string>true</string>
+            <key>ASIMOV_OPT_BATCH_SIZE</key>
+            <string>50</string>
+            
             <!-- Skip size calculation for speed -->
             <key>ASIMOV_OPT_SKIP_SIZE</key>
             <string>true</string>
-            <!-- Optional: Enable logging (uncomment to enable) -->
-            <!-- <key>ASIMOV_LOG_FILE</key> -->
-            <!-- <string>/Users/YOUR_USERNAME/.local/log/asimov.log</string> -->
-            <!-- <key>ASIMOV_LOG_FORMAT</key> -->
-            <!-- <string>text</string> -->
+            
+            <!-- Enable JSON logging -->
+            <key>ASIMOV_LOG_FILE</key>
+            <string>~/.local/log/asimov.log</string>
+            <key>ASIMOV_LOG_FORMAT</key>
+            <string>json</string>
+            
+            <!-- Show full paths in status output -->
+            <key>ASIMOV_STATUS_TRUNCATE</key>
+            <string>false</string>
         </dict>
     </dict>
 </plist>

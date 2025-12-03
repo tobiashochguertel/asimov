@@ -225,17 +225,23 @@ echo ""
 export ASIMOV_ROOT="$HOME"
 export ASIMOV_VERBOSE=true
 export ASIMOV_OPT_CACHE=true
-export ASIMOV_OPT_MMAP=true
+export ASIMOV_OPT_SQLITE=true
 export ASIMOV_OPT_SKIP_SIZE=true
-export ASIMOV_OPT_PARALLEL=true
-export ASIMOV_OPT_PARALLEL_JOBS=4
+export ASIMOV_OPT_BATCH=true
+export ASIMOV_OPT_BATCH_SIZE=50
+export ASIMOV_LOG_FILE="${HOME}/.local/log/asimov.log"
+export ASIMOV_LOG_FORMAT=json
+
+# Create log directory
+mkdir -p "${HOME}/.local/log" 2>/dev/null || true
 
 echo "Configuration:"
 echo "  ASIMOV_ROOT=$ASIMOV_ROOT"
 echo "  ASIMOV_OPT_CACHE=$ASIMOV_OPT_CACHE"
-echo "  ASIMOV_OPT_MMAP=$ASIMOV_OPT_MMAP"
+echo "  ASIMOV_OPT_SQLITE=$ASIMOV_OPT_SQLITE"
+echo "  ASIMOV_OPT_BATCH=$ASIMOV_OPT_BATCH"
 echo "  ASIMOV_OPT_SKIP_SIZE=$ASIMOV_OPT_SKIP_SIZE"
-echo "  ASIMOV_OPT_PARALLEL=$ASIMOV_OPT_PARALLEL"
+echo "  ASIMOV_LOG_FILE=$ASIMOV_LOG_FILE"
 echo ""
 
 # Run the full scan
@@ -253,9 +259,12 @@ echo "Summary:"
 TOTAL=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | wc -l | tr -d ' ')
 echo "  Total Time Machine exclusions: $TOTAL"
 
-if [[ -f ~/.cache/asimov-exclusions ]]; then
+if [[ -f ~/.cache/asimov.db ]]; then
+    CACHED=$(sqlite3 ~/.cache/asimov.db "SELECT COUNT(*) FROM exclusions" 2>/dev/null || echo "0")
+    echo "  SQLite cache entries: $CACHED"
+elif [[ -f ~/.cache/asimov-exclusions ]]; then
     CACHED=$(wc -l < ~/.cache/asimov-exclusions | tr -d ' ')
-    echo "  Entries in cache: $CACHED"
+    echo "  File cache entries: $CACHED"
 fi
 
 echo ""

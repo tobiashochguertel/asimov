@@ -26,6 +26,8 @@ NC='\033[0m' # No Color
 # Parse arguments
 USE_ZSH=false
 UNINSTALL=false
+UPGRADE=false
+SKIP_RUN=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --zsh)
@@ -36,11 +38,22 @@ while [[ $# -gt 0 ]]; do
             UNINSTALL=true
             shift
             ;;
+        --upgrade)
+            UPGRADE=true
+            USE_ZSH=true
+            shift
+            ;;
+        --skip-run)
+            SKIP_RUN=true
+            shift
+            ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
             echo "Options:"
             echo "  --zsh       Install the optimized ZSH version (asimov-zsh)"
+            echo "  --upgrade   Upgrade existing asimov-zsh installation (preserves cache)"
+            echo "  --skip-run  Don't run asimov after install/upgrade"
             echo "  --uninstall Remove asimov installation"
             echo "  -h          Show this help message"
             echo ""
@@ -50,6 +63,11 @@ while [[ $# -gt 0 ]]; do
             echo "Installation locations:"
             echo "  Binary:  ${INSTALL_BIN}/asimov"
             echo "  Daemon:  ${LAUNCH_AGENTS_DIR}/<plist>"
+            echo ""
+            echo "Examples:"
+            echo "  ./install.sh --zsh           # Fresh install of ZSH version"
+            echo "  ./install.sh --upgrade       # Upgrade existing installation"
+            echo "  ./install.sh --uninstall     # Remove asimov"
             exit 0
             ;;
         *)
@@ -90,6 +108,104 @@ uninstall() {
 
 if $UNINSTALL; then
     uninstall
+fi
+
+# Upgrade function
+upgrade() {
+    echo -e "${CYAN}Upgrading asimov-zsh...${NC}"
+    echo ""
+    
+    # Check for fd dependency
+    if ! command -v fd &>/dev/null; then
+        echo -e "${RED}Error: 'fd' is required for asimov-zsh but not installed.${NC}"
+        echo "Install it via: brew install fd"
+        exit 1
+    fi
+    
+    # Get current version info
+    local current_version=""
+    if [[ -x "${INSTALL_BIN}/asimov" ]]; then
+        current_version=$(grep -m1 "# @version" "${INSTALL_BIN}/asimov" 2>/dev/null | awk '{print $3}' || echo "unknown")
+    fi
+    local new_version=$(grep -m1 "# @version" "${DIR}/asimov-zsh" 2>/dev/null | awk '{print $3}' || echo "unknown")
+    
+    echo -e "  Current version: ${YELLOW}${current_version:-not installed}${NC}"
+    echo -e "  New version:     ${GREEN}${new_version}${NC}"
+    echo ""
+    
+    # Unload existing daemon
+    if launchctl list 2>/dev/null | grep -q com.tobiashochguertel.asimov-zsh; then
+        echo -e "${CYAN}Stopping asimov-zsh daemon...${NC}"
+        launchctl unload "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}" 2>/dev/null || true
+        echo -e "${GREEN}✓ Daemon stopped${NC}"
+    fi
+    
+    # Verify that Asimov-ZSH is executable
+    chmod +x "${DIR}/asimov-zsh"
+    
+    # Copy Asimov-ZSH to /usr/local/bin
+    echo -e "${CYAN}Updating asimov-zsh binary...${NC}"
+    if [[ -w "${INSTALL_BIN}" ]]; then
+        cp -f "${DIR}/asimov-zsh" "${INSTALL_BIN}/asimov"
+    else
+        sudo cp -f "${DIR}/asimov-zsh" "${INSTALL_BIN}/asimov"
+    fi
+    chmod +x "${INSTALL_BIN}/asimov"
+    echo -e "${GREEN}✓ Binary updated${NC}"
+    
+    # Update plist (daemon configuration)
+    echo -e "${CYAN}Updating daemon configuration...${NC}"
+    cp -f "${DIR}/${PLIST_ZSH}" "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}"
+    echo -e "${GREEN}✓ Daemon configuration updated${NC}"
+    
+    # Create log directory if logging is enabled in plist
+    mkdir -p "${HOME}/.local/log" 2>/dev/null || true
+    
+    # Initialize SQLite cache from existing exclusions
+    echo -e "${CYAN}Initializing SQLite cache from existing exclusions...${NC}"
+    ASIMOV_OPT_SQLITE=true ASIMOV_INIT_CACHE=true "${INSTALL_BIN}/asimov"
+    echo -e "${GREEN}✓ SQLite cache initialized${NC}"
+    
+    # Reload the daemon
+    echo -e "${CYAN}Starting asimov-zsh daemon...${NC}"
+    launchctl load "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}"
+    echo -e "${GREEN}✓ Daemon started${NC}"
+    
+    echo ""
+    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║                   Upgrade Complete!                        ║${NC}"
+    echo -e "${GREEN}╠════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}║  Version: ${current_version:-unknown} → ${new_version}${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}║  What was updated:                                         ║${NC}"
+    echo -e "${GREEN}║  • Binary at /usr/local/bin/asimov                         ║${NC}"
+    echo -e "${GREEN}║  • Daemon configuration (plist)                            ║${NC}"
+    echo -e "${GREEN}║  • SQLite cache initialized from existing exclusions       ║${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}║  New features enabled by default:                          ║${NC}"
+    echo -e "${GREEN}║  • SQLite cache (O(log n) indexed lookups)                 ║${NC}"
+    echo -e "${GREEN}║  • JSON logging to ~/.local/log/asimov.log                 ║${NC}"
+    echo -e "${GREEN}║  • Batch operations for better performance                 ║${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}║  Commands:                                                 ║${NC}"
+    echo -e "${GREEN}║    ASIMOV_STATUS=true asimov     Check status              ║${NC}"
+    echo -e "${GREEN}║    tail -f ~/.local/log/asimov.log   View logs             ║${NC}"
+    echo -e "${GREEN}║                                                            ║${NC}"
+    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
+    
+    if ! $SKIP_RUN; then
+        echo ""
+        echo -e "${CYAN}Running asimov to verify installation...${NC}"
+        echo ""
+        ASIMOV_STATUS=true "${INSTALL_BIN}/asimov"
+    fi
+    
+    exit 0
+}
+
+if $UPGRADE; then
+    upgrade
 fi
 
 # Ensure directories exist
@@ -137,17 +253,22 @@ if $USE_ZSH; then
     echo -e "${CYAN}Installing daemon to ${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}...${NC}"
     cp -f "${DIR}/${PLIST_ZSH}" "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}"
     echo -e "${GREEN}✓ Daemon plist installed${NC}"
+    
+    # Create log directory
+    mkdir -p "${HOME}/.local/log" 2>/dev/null || true
 
     # Load the daemon
     launchctl load "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}"
     echo -e "${GREEN}✓ Daemon loaded (will run daily)${NC}"
 
     # Run Asimov-ZSH for the first time
-    echo ""
-    echo -e "${CYAN}Running asimov for the first time...${NC}"
-    echo -e "${YELLOW}(This may take a while for large home directories)${NC}"
-    echo ""
-    "${INSTALL_BIN}/asimov"
+    if ! $SKIP_RUN; then
+        echo ""
+        echo -e "${CYAN}Running asimov for the first time...${NC}"
+        echo -e "${YELLOW}(This may take a while for large home directories)${NC}"
+        echo ""
+        "${INSTALL_BIN}/asimov"
+    fi
     
 else
     echo -e "${CYAN}Installing asimov (original bash version)...${NC}"
@@ -188,10 +309,12 @@ else
     echo -e "${GREEN}✓ Daemon loaded (will run daily)${NC}"
 
     # Run Asimov for the first time
-    echo ""
-    echo -e "${CYAN}Running asimov for the first time...${NC}"
-    echo ""
-    "${INSTALL_BIN}/asimov"
+    if ! $SKIP_RUN; then
+        echo ""
+        echo -e "${CYAN}Running asimov for the first time...${NC}"
+        echo ""
+        "${INSTALL_BIN}/asimov"
+    fi
 fi
 
 echo ""

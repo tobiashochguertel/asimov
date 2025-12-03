@@ -106,10 +106,19 @@ typeset -A ASIMOV_CONFIG=(
     [opt_mmap]="${ASIMOV_OPT_MMAP:-false}"
     [opt_batch]="${ASIMOV_OPT_BATCH:-false}"
     [opt_batch_size]="${ASIMOV_OPT_BATCH_SIZE:-50}"
+    [opt_sqlite]="${ASIMOV_OPT_SQLITE:-false}"
+    [opt_sqlite_db]="${ASIMOV_SQLITE_DB:-${HOME}/.cache/asimov.db}"
     [status_file]="${ASIMOV_STATUS_FILE:-${HOME}/.cache/asimov-status.json}"
     [log_file]="${ASIMOV_LOG_FILE:-}"
     [log_format]="${ASIMOV_LOG_FORMAT:-text}"
 )
+
+# Expand ~ to $HOME in path-related config values (launchd doesn't expand ~)
+for key in root opt_cache_file opt_sqlite_db status_file log_file; do
+    if [[ -n "${ASIMOV_CONFIG[$key]}" ]] && [[ "${ASIMOV_CONFIG[$key]}" == "~"* ]]; then
+        ASIMOV_CONFIG[$key]="${ASIMOV_CONFIG[$key]/#\~/$HOME}"
+    fi
+done
 
 # =============================================================================
 # Logging System
@@ -134,12 +143,12 @@ log_msg() {
     local message="$2"
     local event="${3:-}"
     local extra="${4:-}"
-    
+
     # Skip if no log file configured
     [[ -z "${ASIMOV_CONFIG[log_file]}" ]] && return
-    
+
     local timestamp=$(date -Iseconds)
-    
+
     if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
         # JSON format
         local json="{\"timestamp\":\"$timestamp\",\"level\":\"$level\""
@@ -161,22 +170,22 @@ log_info() {
 }
 
 log_excl() {
-    local path="$1"
+    local excl_path="$1"
     local size="${2:-}"
     if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
-        log_msg "EXCL" "Excluded: $path" "excluded" "\"path\":\"$path\",\"size\":\"$size\""
+        log_msg "EXCL" "Excluded: $excl_path" "excluded" "\"path\":\"$excl_path\",\"size\":\"$size\""
     else
-        log_msg "EXCL" "$path ($size)"
+        log_msg "EXCL" "$excl_path ($size)"
     fi
 }
 
 log_skip() {
-    local path="$1"
+    local skip_path="$1"
     local reason="${2:-cached}"
     if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
-        log_msg "SKIP" "Skipped: $path" "skipped" "\"path\":\"$path\",\"reason\":\"$reason\""
+        log_msg "SKIP" "Skipped: $skip_path" "skipped" "\"path\":\"$skip_path\",\"reason\":\"$reason\""
     else
-        log_msg "SKIP" "$path ($reason)"
+        log_msg "SKIP" "$skip_path ($reason)"
     fi
 }
 
@@ -193,8 +202,9 @@ log_scan_start() {
     [[ "${ASIMOV_CONFIG[opt_batch]}" == "true" ]] && opts+="batch,"
     [[ "${ASIMOV_CONFIG[opt_parallel]}" == "true" ]] && opts+="parallel,"
     [[ "${ASIMOV_CONFIG[opt_incremental]}" == "true" ]] && opts+="incremental,"
+    [[ "${ASIMOV_CONFIG[opt_sqlite]}" == "true" ]] && opts+="sqlite,"
     opts="${opts%,}"  # Remove trailing comma
-    
+
     if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
         log_msg "INFO" "Starting asimov-zsh scan" "scan_start" "\"root\":\"$root\",\"optimizations\":\"$opts\""
     else
@@ -206,7 +216,7 @@ log_scan_complete() {
     local dirs_scanned="$1"
     local dirs_excluded="$2"
     local duration="$3"
-    
+
     if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
         log_msg "INFO" "Scan complete" "scan_complete" "\"dirs_scanned\":$dirs_scanned,\"dirs_excluded\":$dirs_excluded,\"duration_sec\":$duration"
     else
@@ -219,41 +229,41 @@ log_scan_complete() {
 # =============================================================================
 list_current_exclusions() {
     print "${COLORS[cyan]}Retrieving current Time Machine exclusions...${COLORS[reset]}\n"
-    
+
     local root_filter="${ASIMOV_CONFIG[root]}"
     local total_count
     local filtered_count
-    
+
     # Get all exclusions using mdfind (most comprehensive method)
     # Note: sudo provides complete results, but works without for user-accessible paths
     local all_exclusions
     all_exclusions=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null)
-    
+
     total_count=$(echo "$all_exclusions" | wc -l | tr -d ' ')
-    
+
     print "${COLORS[magenta]}Total Time Machine exclusions: $total_count${COLORS[reset]}"
-    
+
     if [[ -n "$root_filter" ]]; then
         local filtered
         filtered=$(echo "$all_exclusions" | grep "^$root_filter" 2>/dev/null)
         filtered_count=$(echo "$filtered" | grep -c . 2>/dev/null || echo "0")
-        
+
         print "${COLORS[magenta]}Exclusions in $root_filter: $filtered_count${COLORS[reset]}\n"
-        
+
         if [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]]; then
             # Show by type
             local node_modules_count=$(echo "$filtered" | grep -c "node_modules" || true)
             local target_count=$(echo "$filtered" | grep -c "/target$" || true)
             local venv_count=$(echo "$filtered" | grep -cE "\.venv$|/venv$" || true)
             local vendor_count=$(echo "$filtered" | grep -c "/vendor$" || true)
-            
+
             print "  node_modules: $node_modules_count"
             print "  target:       $target_count"
             print "  .venv/venv:   $venv_count"
             print "  vendor:       $vendor_count"
             print ""
         fi
-        
+
         echo "$filtered"
     else
         echo "$all_exclusions"
@@ -261,22 +271,92 @@ list_current_exclusions() {
 }
 
 # =============================================================================
+# SQLite Init Functions (for init_cache mode)
+# =============================================================================
+# These functions must be defined before init_cache_from_exclusions calls them
+# The main SQLite cache functions are defined later in the script
+# =============================================================================
+
+_sqlite_init_db_early() {
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    mkdir -p "${db:h}" 2>/dev/null || true
+    sqlite3 "$db" "CREATE TABLE IF NOT EXISTS exclusions (path TEXT PRIMARY KEY)" 2>/dev/null
+}
+
+_sqlite_batch_add_early() {
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    local -a paths=("$@")
+
+    if (( ${#paths[@]} == 0 )); then
+        return
+    fi
+
+    # Use chunked inserts to avoid command line length limits
+    local chunk_size=100
+    local i=0
+    local total=${#paths[@]}
+
+    while (( i < total )); do
+        local sql="BEGIN TRANSACTION;"
+        local j=0
+        while (( j < chunk_size && i + j < total )); do
+            local p="${paths[$((i + j + 1))]}"  # ZSH arrays are 1-indexed
+            sql+="INSERT OR IGNORE INTO exclusions VALUES ('${p//\'/\'\'}');"
+            ((++j))  # Use prefix increment to avoid returning 0
+        done
+        sql+="COMMIT;"
+
+        sqlite3 "$db" "$sql" 2>/dev/null
+        ((i += chunk_size)) || true
+    done
+}
+
+_sqlite_init_from_mdfind_early() {
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    local root="${ASIMOV_CONFIG[root]}"
+
+    print "${COLORS[cyan]}Initializing SQLite cache from current Time Machine exclusions...${COLORS[reset]}\n"
+
+    _sqlite_init_db_early
+
+    # Get exclusions and batch insert
+    local -a exclusions=()
+    while IFS= read -r excl_line; do
+        [[ -n "$excl_line" ]] && exclusions+=("$excl_line")
+    done < <(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | grep "^$root" 2>/dev/null)
+
+    if (( ${#exclusions[@]} > 0 )); then
+        _sqlite_batch_add_early "${exclusions[@]}"
+    fi
+
+    local count=$(sqlite3 "$db" "SELECT COUNT(*) FROM exclusions" 2>/dev/null || echo "0")
+    print "${COLORS[green]}SQLite cache initialized with $count exclusions${COLORS[reset]}"
+    print "Database file: $db"
+}
+
+# =============================================================================
 # Initialize Cache Mode - Populate cache from current exclusions
 # =============================================================================
 init_cache_from_exclusions() {
+    # Use SQLite if enabled
+    if [[ "${ASIMOV_CONFIG[opt_sqlite]}" == "true" ]]; then
+        _sqlite_init_from_mdfind_early
+        return
+    fi
+
     print "${COLORS[cyan]}Initializing cache from current Time Machine exclusions...${COLORS[reset]}\n"
-    
+
     mkdir -p "${ASIMOV_CONFIG[opt_cache_file]:h}" 2>/dev/null || true
-    
+
     # Get exclusions filtered by root
     local exclusions
     exclusions=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | grep "^${ASIMOV_CONFIG[root]}" 2>/dev/null)
-    
+
     local count=$(echo "$exclusions" | grep -c . 2>/dev/null || echo "0")
-    
+
     # Write to cache file
     echo "$exclusions" > "${ASIMOV_CONFIG[opt_cache_file]}"
-    
+
     print "${COLORS[green]}Cache initialized with $count exclusions${COLORS[reset]}"
     print "Cache file: ${ASIMOV_CONFIG[opt_cache_file]}"
 }
@@ -289,27 +369,27 @@ show_service_status() {
     local plist_file="${HOME}/Library/LaunchAgents/${service_name}.plist"
     local status_file="${ASIMOV_CONFIG[status_file]}"
     local cache_file="${ASIMOV_CONFIG[opt_cache_file]}"
-    
+
     # Use global COLORS hash-map
     local C_CYAN="${COLORS[cyan]}"
     local C_GREEN="${COLORS[green]}"
     local C_RED="${COLORS[red]}"
     local C_YELLOW="${COLORS[yellow]}"
     local C_RESET="${COLORS[reset]}"
-    
+
     print "${C_CYAN}╔═══════════════════════════════════════════════════════════════╗${C_RESET}"
     print "${C_CYAN}║                    Asimov-ZSH Status                          ║${C_RESET}"
     print "${C_CYAN}╠═══════════════════════════════════════════════════════════════╣${C_RESET}"
-    
+
     # Check launchd service status
     local service_status="Not Loaded"
     local status_color="${C_RED}"
-    
+
     if launchctl list 2>/dev/null | grep -q "$service_name"; then
         local launchctl_info=$(launchctl list "$service_name" 2>/dev/null)
         # Parse the plist-style output from launchctl
         local exit_status=$(echo "$launchctl_info" | grep -o '"LastExitStatus" = [0-9]*' | awk -F'= ' '{print $2}' | tr -d ';' 2>/dev/null)
-        
+
         if [[ "$exit_status" == "0" ]] || [[ -z "$exit_status" ]]; then
             service_status="Loaded (Last exit: success)"
             status_color="${C_GREEN}"
@@ -318,10 +398,10 @@ show_service_status() {
             status_color="${C_YELLOW}"
         fi
     fi
-    
+
     printf "${C_CYAN}║${C_RESET}  Service:     %-47s${C_CYAN}║${C_RESET}\n" "$service_name"
     printf "${C_CYAN}║${C_RESET}  Status:      ${status_color}%-47s${C_RESET}${C_CYAN}║${C_RESET}\n" "$service_status"
-    
+
     # Check plist for schedule
     local schedule_info="Unknown"
     if [[ -f "$plist_file" ]]; then
@@ -332,13 +412,13 @@ show_service_status() {
         fi
     fi
     printf "${C_CYAN}║${C_RESET}  Schedule:    %-47s${C_CYAN}║${C_RESET}\n" "$schedule_info"
-    
+
     # Read status file for last run info
     local last_run="Never"
     local last_duration="N/A"
     local dirs_scanned="N/A"
     local dirs_excluded="N/A"
-    
+
     if [[ -f "$status_file" ]]; then
         # Try to parse JSON status file
         if command -v jq &>/dev/null; then
@@ -351,7 +431,7 @@ show_service_status() {
             last_run=$(grep -o '"last_run":"[^"]*"' "$status_file" 2>/dev/null | cut -d'"' -f4 || echo "Never")
         fi
     fi
-    
+
     # Calculate relative time
     local relative_time=""
     if [[ "$last_run" != "Never" ]] && [[ "$last_run" != "null" ]]; then
@@ -368,23 +448,29 @@ show_service_status() {
             fi
         fi
     fi
-    
+
     printf "${C_CYAN}║${C_RESET}  Last Run:    %-47s${C_CYAN}║${C_RESET}\n" "${last_run} ${relative_time}"
-    
+
     print "${C_CYAN}║${C_RESET}                                                               ${C_CYAN}║${C_RESET}"
     print "${C_CYAN}║${C_RESET}  ${C_YELLOW}Statistics:${C_RESET}                                                  ${C_CYAN}║${C_RESET}"
-    
+
     # Get total exclusions from mdfind
     local total_exclusions=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | wc -l | tr -d ' ')
     printf "${C_CYAN}║${C_RESET}    Total TM exclusions:    %-35s${C_CYAN}║${C_RESET}\n" "$total_exclusions"
-    
-    # Get cache entries
+
+    # Get cache entries (check SQLite first, then file)
     local cache_entries="0"
-    if [[ -f "$cache_file" ]]; then
+    local sqlite_db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    if [[ -f "$sqlite_db" ]]; then
+        cache_entries=$(sqlite3 "$sqlite_db" "SELECT COUNT(*) FROM exclusions" 2>/dev/null || echo "0")
+        printf "${C_CYAN}║${C_RESET}    SQLite cache entries:   %-35s${C_CYAN}║${C_RESET}\n" "$cache_entries"
+    elif [[ -f "$cache_file" ]]; then
         cache_entries=$(wc -l < "$cache_file" 2>/dev/null | tr -d ' ')
+        printf "${C_CYAN}║${C_RESET}    Cache entries:          %-35s${C_CYAN}║${C_RESET}\n" "$cache_entries"
+    else
+        printf "${C_CYAN}║${C_RESET}    Cache entries:          %-35s${C_CYAN}║${C_RESET}\n" "$cache_entries"
     fi
-    printf "${C_CYAN}║${C_RESET}    Cache entries:          %-35s${C_CYAN}║${C_RESET}\n" "$cache_entries"
-    
+
     if [[ "$last_duration" != "N/A" ]] && [[ "$last_duration" != "null" ]]; then
         printf "${C_CYAN}║${C_RESET}    Last scan duration:     %-35s${C_CYAN}║${C_RESET}\n" "${last_duration}s"
     fi
@@ -394,15 +480,24 @@ show_service_status() {
     if [[ "$dirs_excluded" != "N/A" ]] && [[ "$dirs_excluded" != "null" ]]; then
         printf "${C_CYAN}║${C_RESET}    Directories excluded:   %-35s${C_CYAN}║${C_RESET}\n" "$dirs_excluded"
     fi
-    
+
     # Show recent exclusions from cache
     print "${C_CYAN}║${C_RESET}                                                               ${C_CYAN}║${C_RESET}"
     print "${C_CYAN}║${C_RESET}  ${C_YELLOW}Recent Exclusions (last 5):${C_RESET}                                  ${C_CYAN}║${C_RESET}"
-    
-    if [[ -f "$cache_file" ]]; then
-        local truncate="${ASIMOV_CONFIG[status_truncate]}"
-        local truncate_len="${ASIMOV_CONFIG[status_truncate_len]}"
-        
+
+    local truncate="${ASIMOV_CONFIG[status_truncate]}"
+    local truncate_len="${ASIMOV_CONFIG[status_truncate_len]}"
+
+    if [[ -f "$sqlite_db" ]]; then
+        # Get last 5 from SQLite
+        while read -r excl_path; do
+            if [[ "$truncate" == "true" ]] && [[ ${#excl_path} -gt $truncate_len ]]; then
+                local keep_len=$((truncate_len - 3))
+                excl_path="...${excl_path: -$keep_len}"
+            fi
+            printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "$excl_path"
+        done < <(sqlite3 "$sqlite_db" "SELECT path FROM exclusions ORDER BY rowid DESC LIMIT 5" 2>/dev/null)
+    elif [[ -f "$cache_file" ]]; then
         while read -r excl_path; do
             # Truncate path if enabled and too long
             if [[ "$truncate" == "true" ]] && [[ ${#excl_path} -gt $truncate_len ]]; then
@@ -412,9 +507,9 @@ show_service_status() {
             printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "$excl_path"
         done < <(tail -5 "$cache_file" 2>/dev/null)
     else
-        printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "(no cache file found)"
+        printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "(no cache found)"
     fi
-    
+
     print "${C_CYAN}╚═══════════════════════════════════════════════════════════════╝${C_RESET}"
 }
 
@@ -424,11 +519,11 @@ save_run_status() {
     local dirs_excluded="$2"
     local duration="$3"
     local status_file="${ASIMOV_CONFIG[status_file]}"
-    
+
     mkdir -p "${status_file:h}" 2>/dev/null || true
-    
+
     local timestamp=$(date -Iseconds)
-    
+
     cat > "$status_file" << EOF
 {
   "last_run": "$timestamp",
@@ -468,17 +563,131 @@ log_init
 typeset -A MMAP_CACHE=()
 typeset -a MMAP_NEW_ENTRIES=()
 
+# =============================================================================
+# SQLite Cache Functions (OPT 15)
+# =============================================================================
+# For very large exclusion lists (100,000+), SQLite provides:
+# - Indexed lookups: O(log n) instead of O(n)
+# - ACID transactions: Safe concurrent access
+# - Compression: SQLite compresses data automatically
+# =============================================================================
+
+sqlite_init_db() {
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    mkdir -p "${db:h}" 2>/dev/null || true
+    sqlite3 "$db" "CREATE TABLE IF NOT EXISTS exclusions (path TEXT PRIMARY KEY)" 2>/dev/null
+    [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "SQLite database initialized: $db"
+}
+
+sqlite_is_cached() {
+    local dir_path="$1"
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    local result
+    result=$(sqlite3 "$db" "SELECT 1 FROM exclusions WHERE path='${dir_path//\'/\'\'}' LIMIT 1" 2>/dev/null)
+    [[ -n "$result" ]]
+}
+
+sqlite_add_to_cache() {
+    local dir_path="$1"
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    sqlite3 "$db" "INSERT OR IGNORE INTO exclusions VALUES ('${dir_path//\'/\'\'}')" 2>/dev/null
+}
+
+sqlite_batch_add_to_cache() {
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    local -a paths=("$@")
+
+    if (( ${#paths[@]} == 0 )); then
+        return
+    fi
+
+    # Use chunked inserts to avoid command line length limits
+    local chunk_size=100
+    local i=0
+    local total=${#paths[@]}
+
+    while (( i < total )); do
+        local sql="BEGIN TRANSACTION;"
+        local j=0
+        while (( j < chunk_size && i + j < total )); do
+            local p="${paths[$((i + j + 1))]}"  # ZSH arrays are 1-indexed
+            sql+="INSERT OR IGNORE INTO exclusions VALUES ('${p//\'/\'\'}');"
+            ((++j))  # Use prefix increment to avoid returning 0
+        done
+        sql+="COMMIT;"
+
+        sqlite3 "$db" "$sql" 2>/dev/null
+        ((i += chunk_size)) || true
+    done
+}
+
+sqlite_get_count() {
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    sqlite3 "$db" "SELECT COUNT(*) FROM exclusions" 2>/dev/null || echo "0"
+}
+
+sqlite_init_from_mdfind() {
+    local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
+    local root="${ASIMOV_CONFIG[root]}"
+
+    print "${COLORS[cyan]}Initializing SQLite cache from current Time Machine exclusions...${COLORS[reset]}\n"
+
+    sqlite_init_db
+
+    # Get exclusions and batch insert
+    local -a exclusions=()
+    while IFS= read -r excl_line; do
+        [[ -n "$excl_line" ]] && exclusions+=("$excl_line")
+    done < <(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | grep "^$root" 2>/dev/null)
+
+    if (( ${#exclusions[@]} > 0 )); then
+        sqlite_batch_add_to_cache "${exclusions[@]}"
+    fi
+
+    local count=$(sqlite_get_count)
+    print "${COLORS[green]}SQLite cache initialized with $count exclusions${COLORS[reset]}"
+    print "Database file: $db"
+}
+
+# Batch buffer for SQLite writes (reduces transaction overhead)
+typeset -a SQLITE_BATCH_BUFFER=()
+
+sqlite_add_to_batch() {
+    local dir_path="$1"
+    SQLITE_BATCH_BUFFER+=("$dir_path")
+
+    # Flush when buffer reaches batch size
+    if (( ${#SQLITE_BATCH_BUFFER[@]} >= ${ASIMOV_CONFIG[opt_batch_size]} )); then
+        sqlite_flush_batch
+    fi
+}
+
+sqlite_flush_batch() {
+    if (( ${#SQLITE_BATCH_BUFFER[@]} > 0 )); then
+        sqlite_batch_add_to_cache "${SQLITE_BATCH_BUFFER[@]}"
+        [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "Flushed ${#SQLITE_BATCH_BUFFER[@]} entries to SQLite"
+        SQLITE_BATCH_BUFFER=()
+    fi
+}
+
 # Initialize cache
 if [[ "${ASIMOV_CONFIG[opt_cache]}" == "true" ]]; then
-    mkdir -p "${ASIMOV_CONFIG[opt_cache_file]:h}" 2>/dev/null || true
-    touch "${ASIMOV_CONFIG[opt_cache_file]}" 2>/dev/null || true
-    
-    # OPT 5: Load cache into memory for fast lookups
-    if [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]] && [[ -f "${ASIMOV_CONFIG[opt_cache_file]}" ]]; then
-        while IFS= read -r cached_path; do
-            [[ -n "$cached_path" ]] && MMAP_CACHE[$cached_path]=1
-        done < "${ASIMOV_CONFIG[opt_cache_file]}"
-        [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "Loaded ${#MMAP_CACHE[@]} entries into memory cache"
+    if [[ "${ASIMOV_CONFIG[opt_sqlite]}" == "true" ]]; then
+        # OPT 15: SQLite cache initialization
+        sqlite_init_db
+        local sqlite_count=$(sqlite_get_count)
+        [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "SQLite cache has $sqlite_count entries"
+    else
+        mkdir -p "${ASIMOV_CONFIG[opt_cache_file]:h}" 2>/dev/null || true
+        touch "${ASIMOV_CONFIG[opt_cache_file]}" 2>/dev/null || true
+
+        # OPT 5: Load cache into memory for fast lookups
+        if [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]] && [[ -f "${ASIMOV_CONFIG[opt_cache_file]}" ]]; then
+            while IFS= read -r cached_path; do
+                [[ -n "$cached_path" ]] && MMAP_CACHE[$cached_path]=1
+            done < "${ASIMOV_CONFIG[opt_cache_file]}"
+            [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "Loaded ${#MMAP_CACHE[@]} entries into memory cache"
+        fi
     fi
 fi
 
@@ -540,12 +749,12 @@ for pair in "${ASIMOV_VENDOR_DIR_SENTINELS[@]}"; do
     # ZSH native word splitting
     local dir_name="${pair%% *}"
     local sentinel="${pair#* }"
-    
+
     # Add to unique dirs list (use (I) instead of (r) to avoid unset error)
     if (( ! ${VENDOR_DIRS[(I)$dir_name]} )); then
         VENDOR_DIRS+=("$dir_name")
     fi
-    
+
     # Map: dir_name -> list of possible sentinels (space-separated)
     if [[ -n "${SENTINEL_MAP[$dir_name]:-}" ]]; then
         SENTINEL_MAP[$dir_name]+=" $sentinel"
@@ -566,7 +775,7 @@ has_sentinel() {
     local dir_name="${dir_path:t}"
     local parent_dir="${dir_path:h}"
     local sentinels="${SENTINEL_MAP[$dir_name]}"
-    
+
     # ZSH native: split sentinels and check each
     for sentinel in ${(s: :)sentinels}; do
         if [[ -e "$parent_dir/$sentinel" ]]; then
@@ -576,14 +785,24 @@ has_sentinel() {
     return 1
 }
 
-# OPT 1 & 5: Check cache for already-excluded paths
+# OPT 1, 5 & 15: Check cache for already-excluded paths
 is_cached_exclusion() {
     local dir_path="$1"
-    
+
     if [[ "${ASIMOV_CONFIG[opt_cache]}" != "true" ]]; then
         return 1
     fi
-    
+
+    # OPT 15: SQLite cache lookup
+    if [[ "${ASIMOV_CONFIG[opt_sqlite]}" == "true" ]]; then
+        if sqlite_is_cached "$dir_path"; then
+            [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "- $dir_path found in SQLite cache, skipping."
+            log_skip "$dir_path" "sqlite_cache"
+            return 0
+        fi
+        return 1
+    fi
+
     # OPT 5: Use in-memory hash for O(1) lookup
     if [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]]; then
         if [[ -n "${MMAP_CACHE[$dir_path]:-}" ]]; then
@@ -593,7 +812,7 @@ is_cached_exclusion() {
         fi
         return 1
     fi
-    
+
     # Fallback: grep file (slower, O(n))
     if [[ -f "${ASIMOV_CONFIG[opt_cache_file]}" ]] && grep -qF "$dir_path" "${ASIMOV_CONFIG[opt_cache_file]}" 2>/dev/null; then
         [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "- $dir_path found in file cache, skipping."
@@ -603,14 +822,20 @@ is_cached_exclusion() {
     return 1
 }
 
-# OPT 1 & 5: Add path to exclusion cache
+# OPT 1, 5 & 15: Add path to exclusion cache
 add_to_cache() {
     local dir_path="$1"
-    
+
     if [[ "${ASIMOV_CONFIG[opt_cache]}" != "true" ]]; then
         return
     fi
-    
+
+    # OPT 15: SQLite cache with batched writes
+    if [[ "${ASIMOV_CONFIG[opt_sqlite]}" == "true" ]]; then
+        sqlite_add_to_batch "$dir_path"
+        return
+    fi
+
     # OPT 5: Add to in-memory hash and batch for later write
     if [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]]; then
         MMAP_CACHE[$dir_path]=1
@@ -621,8 +846,15 @@ add_to_cache() {
     fi
 }
 
-# OPT 5: Flush in-memory cache to disk (called at end)
+# OPT 5 & 15: Flush caches to disk (called at end)
 flush_mmap_cache() {
+    # OPT 15: Flush SQLite batch buffer
+    if [[ "${ASIMOV_CONFIG[opt_sqlite]}" == "true" ]]; then
+        sqlite_flush_batch
+        return
+    fi
+
+    # OPT 5: Flush in-memory cache to file
     if [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]] && (( ${#MMAP_NEW_ENTRIES[@]} > 0 )); then
         printf '%s\n' "${MMAP_NEW_ENTRIES[@]}" >> "${ASIMOV_CONFIG[opt_cache_file]}"
         [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "\nFlushed ${#MMAP_NEW_ENTRIES[@]} new entries to cache file"
@@ -639,23 +871,23 @@ typeset -A BATCH_EXCLUDED_MAP=()
 
 batch_check_exclusions() {
     local -a paths=("$@")
-    
+
     if (( ${#paths[@]} == 0 )); then
         return
     fi
-    
+
     # Run tmutil isexcluded on all paths at once
     local output
     output=$(tmutil isexcluded "${paths[@]}" 2>/dev/null) || true
-    
+
     # Parse output: each line is "[Excluded] path" or "[Included] path"
     while IFS= read -r line; do
         if [[ "$line" == "[Excluded]"* ]]; then
-            local path="${line#\[Excluded\]	}"
-            BATCH_EXCLUDED_MAP[$path]="excluded"
+            local excl_p="${line#\[Excluded\]	}"
+            BATCH_EXCLUDED_MAP[$excl_p]="excluded"
         elif [[ "$line" == "[Included]"* ]]; then
-            local path="${line#\[Included\]	}"
-            BATCH_EXCLUDED_MAP[$path]="included"
+            local incl_p="${line#\[Included\]	}"
+            BATCH_EXCLUDED_MAP[$incl_p]="included"
         fi
     done <<< "$output"
 }
@@ -666,11 +898,11 @@ typeset -A BATCH_SIZE_MAP=()
 
 batch_get_sizes() {
     local -a paths=("$@")
-    
+
     if (( ${#paths[@]} == 0 )) || [[ "${ASIMOV_CONFIG[opt_skip_size]}" == "true" ]]; then
         return
     fi
-    
+
     local output
     if [[ "${ASIMOV_CONFIG[opt_dust]}" == "true" ]] && command -v dust &>/dev/null; then
         # dust doesn't support multiple paths in a simple way, fall back to du
@@ -678,11 +910,11 @@ batch_get_sizes() {
     else
         output=$(du -hs "${paths[@]}" 2>/dev/null) || true
     fi
-    
+
     # Parse output: each line is "SIZE\tPATH"
-    while IFS=$'\t' read -r size path; do
-        if [[ -n "$path" ]]; then
-            BATCH_SIZE_MAP[$path]="$size"
+    while IFS=$'\t' read -r size filepath; do
+        if [[ -n "$filepath" ]]; then
+            BATCH_SIZE_MAP[$filepath]="$size"
         fi
     done <<< "$output"
 }
@@ -690,13 +922,13 @@ batch_get_sizes() {
 # Process a batch of paths - check exclusions and sizes, then exclude
 process_batch() {
     local -a paths=("$@")
-    
+
     if (( ${#paths[@]} == 0 )); then
         return
     fi
-    
+
     [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "Processing batch of ${#paths[@]} paths..."
-    
+
     # Filter out cached paths first
     local -a uncached_paths=()
     for path in "${paths[@]}"; do
@@ -704,14 +936,14 @@ process_batch() {
             uncached_paths+=("$path")
         fi
     done
-    
+
     if (( ${#uncached_paths[@]} == 0 )); then
         return
     fi
-    
+
     # Batch check exclusion status
     batch_check_exclusions "${uncached_paths[@]}"
-    
+
     # Find paths that need to be excluded
     local -a to_exclude=()
     for path in "${uncached_paths[@]}"; do
@@ -722,18 +954,18 @@ process_batch() {
             to_exclude+=("$path")
         fi
     done
-    
+
     if (( ${#to_exclude[@]} == 0 )); then
         return
     fi
-    
+
     # Batch get sizes for paths to exclude
     batch_get_sizes "${to_exclude[@]}"
-    
+
     # Exclude each path
     for path in "${to_exclude[@]}"; do
         local size="${BATCH_SIZE_MAP[$path]:-N/A}"
-        
+
         if [[ "${ASIMOV_CONFIG[dry_run]}" == "true" ]]; then
             print -- "[DRY-RUN] Would exclude: $path ($size)"
         else
@@ -742,7 +974,7 @@ process_batch() {
             add_to_cache "$path"
         fi
     done
-    
+
     # Clear batch maps for next batch
     BATCH_EXCLUDED_MAP=()
     BATCH_SIZE_MAP=()
@@ -751,12 +983,12 @@ process_batch() {
 # OPT 6: Get directory size using configured method
 get_dir_size() {
     local dir_path="$1"
-    
+
     if [[ "${ASIMOV_CONFIG[opt_skip_size]}" == "true" ]]; then
         print "N/A"
         return
     fi
-    
+
     if [[ "${ASIMOV_CONFIG[opt_dust]}" == "true" ]] && command -v dust &>/dev/null; then
         # Use dust for faster size calculation
         dust -d 0 -b "$dir_path" 2>/dev/null | tail -1 | awk '{print $1}'
@@ -789,7 +1021,7 @@ manage_parallel_pool() {
                 fi
             done
             PARALLEL_PIDS=("${new_pids[@]}")
-            
+
             if (( ${#PARALLEL_PIDS[@]} >= ${ASIMOV_CONFIG[opt_parallel_jobs]} )); then
                 sleep 0.1
             fi
@@ -800,16 +1032,16 @@ manage_parallel_pool() {
 # Exclude the given path from Time Machine backups using ZSH builtins
 exclude_path() {
     local dir_path="$1"
-    
+
     # OPT 1: Check cache first
     if is_cached_exclusion "$dir_path"; then
         return
     fi
-    
+
     # Check if already excluded using ZSH pattern matching
     local status_output
     status_output=$(tmutil isexcluded "$dir_path" 2>/dev/null)
-    
+
     if [[ "$status_output" == *"[Excluded]"* ]]; then
         [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "- $dir_path is already excluded, skipping."
         log_skip "$dir_path" "already_excluded"
@@ -817,11 +1049,11 @@ exclude_path() {
         add_to_cache "$dir_path"
         return
     fi
-    
+
     # OPT 6: Get size using configured method
     local sizeondisk
     sizeondisk=$(get_dir_size "$dir_path")
-    
+
     if [[ "${ASIMOV_CONFIG[dry_run]}" == "true" ]]; then
         print -- "[DRY-RUN] Would exclude: $dir_path ($sizeondisk)"
         log_info "DRY-RUN: Would exclude $dir_path ($sizeondisk)"
@@ -837,7 +1069,7 @@ exclude_path() {
 # OPT 3: Parallel version of exclude_path
 exclude_path_parallel() {
     local dir_path="$1"
-    
+
     if [[ "${ASIMOV_CONFIG[opt_parallel]}" == "true" ]]; then
         manage_parallel_pool
         exclude_path "$dir_path" &
@@ -851,7 +1083,7 @@ exclude_path_parallel() {
 print_config() {
     print "\n${COLORS[cyan]}Finding dependency directories in ${ASIMOV_CONFIG[root]}…${COLORS[reset]}"
     [[ "${ASIMOV_CONFIG[dry_run]}" == "true" ]] && print "${COLORS[yellow]}[DRY-RUN MODE - no changes will be made]${COLORS[reset]}"
-    
+
     if [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]]; then
         print "${COLORS[magenta]}Optimizations enabled:${COLORS[reset]}"
         [[ "${ASIMOV_CONFIG[opt_cache]}" == "true" ]] && print "  - Caching (OPT 1): ${ASIMOV_CONFIG[opt_cache_file]}"
@@ -863,6 +1095,7 @@ print_config() {
         [[ "${ASIMOV_CONFIG[opt_skip_size]}" == "true" ]] && print "  - Skip size calculation (OPT 6)"
         [[ "${ASIMOV_CONFIG[opt_batch]}" == "true" ]] && print "  - Batch operations (OPT 7): batch size ${ASIMOV_CONFIG[opt_batch_size]}"
         [[ -n "${ASIMOV_CONFIG[log_file]}" ]] && print "  - Logging (OPT 8): ${ASIMOV_CONFIG[log_file]} (${ASIMOV_CONFIG[log_format]})"
+        [[ "${ASIMOV_CONFIG[opt_sqlite]}" == "true" ]] && print "  - SQLite cache (OPT 15): ${ASIMOV_CONFIG[opt_sqlite_db]}"
     fi
 }
 
@@ -905,27 +1138,27 @@ fd_args+=("${FD_EXCLUDE_ARGS[@]}")
 if [[ "${ASIMOV_CONFIG[opt_batch]}" == "true" ]]; then
     typeset -a batch_paths=()
     typeset -a all_valid_paths=()
-    
+
     # First collect all valid paths (fd output piped to while runs in subshell, so collect first)
     while IFS= read -r found_path; do
         if has_sentinel "$found_path"; then
             all_valid_paths+=("$found_path")
         fi
     done < <(fd "${fd_args[@]}" "$fd_pattern" "${ASIMOV_CONFIG[root]}" 2>/dev/null)
-    
+
     SCAN_DIRS_FOUND=${#all_valid_paths[@]}
-    
+
     # Process paths in batches
     for path in "${all_valid_paths[@]}"; do
         batch_paths+=("$path")
-        
+
         # Process batch when it reaches the configured size
         if (( ${#batch_paths[@]} >= ${ASIMOV_CONFIG[opt_batch_size]} )); then
             process_batch "${batch_paths[@]}"
             batch_paths=()
         fi
     done
-    
+
     # Process remaining paths in the final batch
     if (( ${#batch_paths[@]} > 0 )); then
         process_batch "${batch_paths[@]}"
@@ -938,7 +1171,7 @@ else
             exclude_path_parallel "$found_path"
         fi
     done
-    
+
     # OPT 3: Wait for all parallel jobs to complete
     wait_for_parallel_jobs
 fi

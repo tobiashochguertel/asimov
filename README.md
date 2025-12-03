@@ -100,6 +100,54 @@ cd ~/asimov
 - Loads a launchd daemon to run asimov daily
 - Runs asimov for the first time
 
+## Upgrading
+
+If you already have asimov-zsh installed and want to upgrade to the latest version:
+
+### Quick Upgrade
+
+```sh
+# Navigate to your asimov directory
+cd ~/asimov  # or wherever you cloned it
+
+# Pull the latest changes
+git pull
+
+# Run the upgrade
+./install.sh --upgrade
+```
+
+The upgrade command will:
+
+- Stop the running daemon
+- Update the binary at `/usr/local/bin/asimov`
+- Update the daemon configuration with new optimizations enabled
+- **Initialize SQLite cache from existing exclusions**
+- Restart the daemon
+
+Everything is automatic - no manual steps required.
+
+### Verify the Upgrade
+
+```sh
+# Check the service status
+ASIMOV_STATUS=true asimov
+
+# View recent logs
+tail -f ~/.local/log/asimov.log
+```
+
+### What's New After Upgrade
+
+The new plist configuration enables these features by default:
+
+| Feature        | Description                                    |
+|----------------|------------------------------------------------|
+| SQLite Cache   | O(log n) indexed lookups for 100,000+ entries  |
+| JSON Logging   | Structured logging to `~/.local/log/asimov.log`|
+| Batch Mode     | Reduced process spawning overhead              |
+| Skip Size      | Faster scans by skipping size calculation      |
+
 ## Usage
 
 ### Basic Usage
@@ -135,23 +183,27 @@ ASIMOV_INIT_CACHE=true asimov
 Enable optimizations for faster execution:
 
 ```sh
-# Enable caching + in-memory lookups + skip size calculation
+# Enable caching with SQLite + batch operations + skip size calculation
 ASIMOV_OPT_CACHE=true \
-ASIMOV_OPT_MMAP=true \
+ASIMOV_OPT_SQLITE=true \
+ASIMOV_OPT_BATCH=true \
 ASIMOV_OPT_SKIP_SIZE=true \
 asimov
 ```
 
-| Optimization  | Environment Variable          | Description                             |
-|---------------|-------------------------------|-----------------------------------------|
-| Caching       | `ASIMOV_OPT_CACHE=true`       | Cache exclusion status to file          |
-| Memory-mapped | `ASIMOV_OPT_MMAP=true`        | Load cache into memory for O(1) lookups |
-| Incremental   | `ASIMOV_OPT_INCREMENTAL=true` | Only scan recently modified directories |
-| Parallel      | `ASIMOV_OPT_PARALLEL=true`    | Run tmutil calls in parallel            |
-| Gitignore     | `ASIMOV_OPT_GITIGNORE=true`   | Use fd's gitignore awareness            |
-| Skip Size     | `ASIMOV_OPT_SKIP_SIZE=true`   | Skip directory size calculation         |
-| Dust          | `ASIMOV_OPT_DUST=true`        | Use dust instead of du for size         |
-| Batch         | `ASIMOV_OPT_BATCH=true`       | Batch tmutil and du operations          |
+| Optimization  | Environment Variable          | Description                                      |
+|---------------|-------------------------------|--------------------------------------------------|
+| Caching       | `ASIMOV_OPT_CACHE=true`       | Enable exclusion status caching                  |
+| SQLite        | `ASIMOV_OPT_SQLITE=true`      | Use SQLite for O(log n) indexed lookups          |
+| Memory-mapped | `ASIMOV_OPT_MMAP=true`        | Load file cache into memory for O(1) lookups     |
+| Batch         | `ASIMOV_OPT_BATCH=true`       | Batch tmutil and du operations                   |
+| Skip Size     | `ASIMOV_OPT_SKIP_SIZE=true`   | Skip directory size calculation                  |
+| Incremental   | `ASIMOV_OPT_INCREMENTAL=true` | Only scan recently modified directories          |
+| Parallel      | `ASIMOV_OPT_PARALLEL=true`    | Run tmutil calls in parallel                     |
+| Gitignore     | `ASIMOV_OPT_GITIGNORE=true`   | Use fd's gitignore awareness                     |
+| Dust          | `ASIMOV_OPT_DUST=true`        | Use dust instead of du for size                  |
+
+**Recommended for production:** SQLite + Batch + Skip Size (default in launchd plist)
 
 ### Service Status
 
@@ -173,6 +225,8 @@ ASIMOV_LOG_FILE=~/.local/log/asimov.log asimov
 # Log in JSON format
 ASIMOV_LOG_FILE=~/.local/log/asimov.json ASIMOV_LOG_FORMAT=json asimov
 ```
+
+> **Note:** The script automatically expands `~` to `$HOME` in all path-related environment variables. This is necessary because launchd does not expand `~` or `$HOME` in plist environment variables.
 
 ### Color Output
 
