@@ -41,10 +41,6 @@
             <string>~/.local/log/asimov.log</string>
             <key>ASIMOV_LOG_FORMAT</key>
             <string>json</string>
-            
-            <!-- Show full paths in status output -->
-            <key>ASIMOV_STATUS_TRUNCATE</key>
-            <string>false</string>
         </dict>
     </dict>
 </plist>

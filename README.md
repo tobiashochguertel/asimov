@@ -157,25 +157,38 @@ The new plist configuration enables these features by default:
 asimov
 ```
 
-### Optimized ZSH Version Options
+### Command-Line Options
 
-The ZSH version supports many configuration options via environment variables:
+The ZSH version supports command-line arguments for easier use:
 
 ```sh
+asimov --help          # Show help
+asimov --version       # Show version
+asimov --status        # Show service status and statistics
+asimov --list          # List current Time Machine exclusions
+asimov --init-cache    # Initialize cache from current exclusions
+asimov --dry-run       # Preview what would be excluded
+asimov --verbose       # Enable verbose output
+
+# Combine options
+asimov --dry-run --verbose
+
 # Scan a specific directory
+asimov --root ~/work-dev
+asimov ~/work-dev              # Shorthand
+
+# Enable SQLite cache
+asimov --sqlite --init-cache
+```
+
+### Environment Variables
+
+All options can also be set via environment variables:
+
+```sh
 ASIMOV_ROOT=~/work-dev asimov
-
-# Dry run (show what would be excluded without actually excluding)
 ASIMOV_DRY_RUN=true asimov
-
-# Verbose output
 ASIMOV_VERBOSE=true asimov
-
-# List current Time Machine exclusions
-ASIMOV_LIST_EXCLUSIONS=true asimov
-
-# Initialize cache from current exclusions (faster subsequent runs)
-ASIMOV_INIT_CACHE=true asimov
 ```
 
 ### Performance Optimizations (ZSH Version)
@@ -184,6 +197,9 @@ Enable optimizations for faster execution:
 
 ```sh
 # Enable caching with SQLite + batch operations + skip size calculation
+asimov --sqlite --batch
+
+# Or via environment variables
 ASIMOV_OPT_CACHE=true \
 ASIMOV_OPT_SQLITE=true \
 ASIMOV_OPT_BATCH=true \

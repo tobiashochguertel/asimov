@@ -12,7 +12,7 @@
 # - ZSH native string manipulation instead of external cut/grep
 # - Uses zsh/stat module for faster file operations
 #
-# @version 0.10.0
+# @version 0.11.0
 # @author  Steve Grunwell (Original Author)
 # @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
@@ -25,6 +25,125 @@ zmodload zsh/stat 2>/dev/null || true
 zmodload zsh/datetime 2>/dev/null || true
 zmodload zsh/parameter 2>/dev/null || true
 zmodload zsh/zutil 2>/dev/null || true
+
+# =============================================================================
+# Command-line Argument Parsing
+# =============================================================================
+# Supports both --flag and environment variable configuration.
+# Command-line flags override environment variables.
+# =============================================================================
+
+show_help() {
+    cat << 'EOF'
+asimov - Exclude development dependencies from Time Machine backups
+
+Usage: asimov [OPTIONS]
+
+Options:
+  -h, --help          Show this help message
+  -v, --version       Show version information
+  -s, --status        Show service status and statistics
+  -l, --list          List current Time Machine exclusions
+  -i, --init-cache    Initialize cache from current exclusions
+  -n, --dry-run       Show what would be excluded without making changes
+  -V, --verbose       Enable verbose output
+
+Configuration (via environment or flags):
+  --root <path>       Root directory to scan (default: $HOME)
+  --sqlite            Use SQLite cache (recommended for large exclusion lists)
+  --no-sqlite         Use file-based cache
+  --batch             Enable batch operations
+  --no-batch          Disable batch operations
+
+Examples:
+  asimov                     # Run with default settings
+  asimov --status            # Show service status
+  asimov --list              # List all exclusions
+  asimov --init-cache        # Initialize cache from existing exclusions
+  asimov --dry-run --verbose # Preview what would be excluded
+  asimov --root ~/work-dev   # Scan specific directory
+
+Environment Variables:
+  ASIMOV_ROOT, ASIMOV_OPT_CACHE, ASIMOV_OPT_SQLITE, ASIMOV_OPT_BATCH,
+  ASIMOV_OPT_SKIP_SIZE, ASIMOV_LOG_FILE, ASIMOV_LOG_FORMAT, etc.
+
+See README.md for full documentation.
+EOF
+}
+
+show_version() {
+    echo "asimov-zsh version 0.11.0"
+    echo "https://github.com/tobiashochguertel/asimov"
+}
+
+# Parse command-line arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -v|--version)
+            show_version
+            exit 0
+            ;;
+        -s|--status)
+            export ASIMOV_STATUS=true
+            shift
+            ;;
+        -l|--list)
+            export ASIMOV_LIST_EXCLUSIONS=true
+            shift
+            ;;
+        -i|--init-cache)
+            export ASIMOV_INIT_CACHE=true
+            shift
+            ;;
+        -n|--dry-run)
+            export ASIMOV_DRY_RUN=true
+            shift
+            ;;
+        -V|--verbose)
+            export ASIMOV_VERBOSE=true
+            shift
+            ;;
+        --root)
+            export ASIMOV_ROOT="$2"
+            shift 2
+            ;;
+        --root=*)
+            export ASIMOV_ROOT="${1#*=}"
+            shift
+            ;;
+        --sqlite)
+            export ASIMOV_OPT_SQLITE=true
+            export ASIMOV_OPT_CACHE=true
+            shift
+            ;;
+        --no-sqlite)
+            export ASIMOV_OPT_SQLITE=false
+            shift
+            ;;
+        --batch)
+            export ASIMOV_OPT_BATCH=true
+            shift
+            ;;
+        --no-batch)
+            export ASIMOV_OPT_BATCH=false
+            shift
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            echo "Use --help for usage information." >&2
+            exit 1
+            ;;
+        *)
+            # Positional argument - treat as root path
+            export ASIMOV_ROOT="$1"
+            shift
+            ;;
+    esac
+done
 
 # =============================================================================
 # Color System - Global color hash-map with NO_COLOR support
@@ -92,8 +211,6 @@ typeset -A ASIMOV_CONFIG=(
     [list_exclusions]="${ASIMOV_LIST_EXCLUSIONS:-false}"
     [init_cache]="${ASIMOV_INIT_CACHE:-false}"
     [status]="${ASIMOV_STATUS:-false}"
-    [status_truncate]="${ASIMOV_STATUS_TRUNCATE:-true}"
-    [status_truncate_len]="${ASIMOV_STATUS_TRUNCATE_LEN:-55}"
     [opt_cache]="${ASIMOV_OPT_CACHE:-false}"
     [opt_cache_file]="${ASIMOV_CACHE_FILE:-${HOME}/.cache/asimov-exclusions}"
     [opt_incremental]="${ASIMOV_OPT_INCREMENTAL:-false}"
@@ -375,11 +492,12 @@ show_service_status() {
     local C_GREEN="${COLORS[green]}"
     local C_RED="${COLORS[red]}"
     local C_YELLOW="${COLORS[yellow]}"
+    local C_BOLD="${COLORS[bold]}"
     local C_RESET="${COLORS[reset]}"
 
-    print "${C_CYAN}╔═══════════════════════════════════════════════════════════════╗${C_RESET}"
-    print "${C_CYAN}║                    Asimov-ZSH Status                          ║${C_RESET}"
-    print "${C_CYAN}╠═══════════════════════════════════════════════════════════════╣${C_RESET}"
+    print "${C_BOLD}Asimov-ZSH Status${C_RESET}"
+    print "================="
+    print ""
 
     # Check launchd service status
     local service_status="Not Loaded"
@@ -387,7 +505,6 @@ show_service_status() {
 
     if launchctl list 2>/dev/null | grep -q "$service_name"; then
         local launchctl_info=$(launchctl list "$service_name" 2>/dev/null)
-        # Parse the plist-style output from launchctl
         local exit_status=$(echo "$launchctl_info" | grep -o '"LastExitStatus" = [0-9]*' | awk -F'= ' '{print $2}' | tr -d ';' 2>/dev/null)
 
         if [[ "$exit_status" == "0" ]] || [[ -z "$exit_status" ]]; then
@@ -399,8 +516,8 @@ show_service_status() {
         fi
     fi
 
-    printf "${C_CYAN}║${C_RESET}  Service:     %-47s${C_CYAN}║${C_RESET}\n" "$service_name"
-    printf "${C_CYAN}║${C_RESET}  Status:      ${status_color}%-47s${C_RESET}${C_CYAN}║${C_RESET}\n" "$service_status"
+    print "${C_CYAN}Service:${C_RESET}  $service_name"
+    print "${C_CYAN}Status:${C_RESET}   ${status_color}${service_status}${C_RESET}"
 
     # Check plist for schedule
     local schedule_info="Unknown"
@@ -411,7 +528,7 @@ show_service_status() {
             schedule_info="Every ${hours} hours"
         fi
     fi
-    printf "${C_CYAN}║${C_RESET}  Schedule:    %-47s${C_CYAN}║${C_RESET}\n" "$schedule_info"
+    print "${C_CYAN}Schedule:${C_RESET} $schedule_info"
 
     # Read status file for last run info
     local last_run="Never"
@@ -420,14 +537,12 @@ show_service_status() {
     local dirs_excluded="N/A"
 
     if [[ -f "$status_file" ]]; then
-        # Try to parse JSON status file
         if command -v jq &>/dev/null; then
             last_run=$(jq -r '.last_run // "Never"' "$status_file" 2>/dev/null || echo "Never")
             last_duration=$(jq -r '.duration_sec // "N/A"' "$status_file" 2>/dev/null || echo "N/A")
             dirs_scanned=$(jq -r '.dirs_scanned // "N/A"' "$status_file" 2>/dev/null || echo "N/A")
             dirs_excluded=$(jq -r '.dirs_excluded // "N/A"' "$status_file" 2>/dev/null || echo "N/A")
         else
-            # Fallback: simple grep parsing
             last_run=$(grep -o '"last_run":"[^"]*"' "$status_file" 2>/dev/null | cut -d'"' -f4 || echo "Never")
         fi
     fi
@@ -448,69 +563,58 @@ show_service_status() {
             fi
         fi
     fi
+    print "${C_CYAN}Last Run:${C_RESET} ${last_run} ${relative_time}"
 
-    printf "${C_CYAN}║${C_RESET}  Last Run:    %-47s${C_CYAN}║${C_RESET}\n" "${last_run} ${relative_time}"
-
-    print "${C_CYAN}║${C_RESET}                                                               ${C_CYAN}║${C_RESET}"
-    print "${C_CYAN}║${C_RESET}  ${C_YELLOW}Statistics:${C_RESET}                                                  ${C_CYAN}║${C_RESET}"
+    print ""
+    print "${C_YELLOW}Statistics:${C_RESET}"
 
     # Get total exclusions from mdfind
     local total_exclusions=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | wc -l | tr -d ' ')
-    printf "${C_CYAN}║${C_RESET}    Total TM exclusions:    %-35s${C_CYAN}║${C_RESET}\n" "$total_exclusions"
+    print "  Total TM exclusions:  $total_exclusions"
 
     # Get cache entries (check SQLite first, then file)
     local cache_entries="0"
+    local cache_type="none"
     local sqlite_db="${ASIMOV_CONFIG[opt_sqlite_db]}"
     if [[ -f "$sqlite_db" ]]; then
         cache_entries=$(sqlite3 "$sqlite_db" "SELECT COUNT(*) FROM exclusions" 2>/dev/null || echo "0")
-        printf "${C_CYAN}║${C_RESET}    SQLite cache entries:   %-35s${C_CYAN}║${C_RESET}\n" "$cache_entries"
+        cache_type="SQLite"
+        print "  SQLite cache entries: $cache_entries"
+        print "  Database:             $sqlite_db"
     elif [[ -f "$cache_file" ]]; then
         cache_entries=$(wc -l < "$cache_file" 2>/dev/null | tr -d ' ')
-        printf "${C_CYAN}║${C_RESET}    Cache entries:          %-35s${C_CYAN}║${C_RESET}\n" "$cache_entries"
+        cache_type="file"
+        print "  File cache entries:   $cache_entries"
+        print "  Cache file:           $cache_file"
     else
-        printf "${C_CYAN}║${C_RESET}    Cache entries:          %-35s${C_CYAN}║${C_RESET}\n" "$cache_entries"
+        print "  Cache:                (not initialized)"
     fi
 
     if [[ "$last_duration" != "N/A" ]] && [[ "$last_duration" != "null" ]]; then
-        printf "${C_CYAN}║${C_RESET}    Last scan duration:     %-35s${C_CYAN}║${C_RESET}\n" "${last_duration}s"
+        print "  Last scan duration:   ${last_duration}s"
     fi
     if [[ "$dirs_scanned" != "N/A" ]] && [[ "$dirs_scanned" != "null" ]]; then
-        printf "${C_CYAN}║${C_RESET}    Directories scanned:    %-35s${C_CYAN}║${C_RESET}\n" "$dirs_scanned"
+        print "  Directories scanned:  $dirs_scanned"
     fi
     if [[ "$dirs_excluded" != "N/A" ]] && [[ "$dirs_excluded" != "null" ]]; then
-        printf "${C_CYAN}║${C_RESET}    Directories excluded:   %-35s${C_CYAN}║${C_RESET}\n" "$dirs_excluded"
+        print "  Directories excluded: $dirs_excluded"
     fi
 
     # Show recent exclusions from cache
-    print "${C_CYAN}║${C_RESET}                                                               ${C_CYAN}║${C_RESET}"
-    print "${C_CYAN}║${C_RESET}  ${C_YELLOW}Recent Exclusions (last 5):${C_RESET}                                  ${C_CYAN}║${C_RESET}"
-
-    local truncate="${ASIMOV_CONFIG[status_truncate]}"
-    local truncate_len="${ASIMOV_CONFIG[status_truncate_len]}"
+    print ""
+    print "${C_YELLOW}Recent Exclusions (last 5):${C_RESET}"
 
     if [[ -f "$sqlite_db" ]]; then
-        # Get last 5 from SQLite
-        while read -r excl_path; do
-            if [[ "$truncate" == "true" ]] && [[ ${#excl_path} -gt $truncate_len ]]; then
-                local keep_len=$((truncate_len - 3))
-                excl_path="...${excl_path: -$keep_len}"
-            fi
-            printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "$excl_path"
-        done < <(sqlite3 "$sqlite_db" "SELECT path FROM exclusions ORDER BY rowid DESC LIMIT 5" 2>/dev/null)
+        sqlite3 "$sqlite_db" "SELECT path FROM exclusions ORDER BY rowid DESC LIMIT 5" 2>/dev/null | while read -r excl_path; do
+            print "  $excl_path"
+        done
     elif [[ -f "$cache_file" ]]; then
-        while read -r excl_path; do
-            # Truncate path if enabled and too long
-            if [[ "$truncate" == "true" ]] && [[ ${#excl_path} -gt $truncate_len ]]; then
-                local keep_len=$((truncate_len - 3))
-                excl_path="...${excl_path: -$keep_len}"
-            fi
-            printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "$excl_path"
-        done < <(tail -5 "$cache_file" 2>/dev/null)
+        tail -5 "$cache_file" 2>/dev/null | while read -r excl_path; do
+            print "  $excl_path"
+        done
     else
-        printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "(no cache found)"
+        print "  (no cache found - run 'asimov --init-cache' to initialize)"
     fi
-
-    print "${C_CYAN}╚═══════════════════════════════════════════════════════════════╝${C_RESET}"
 }
 
 # Save run status to JSON file (called at end of scan)
