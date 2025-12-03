@@ -12,7 +12,7 @@
 # - ZSH native string manipulation instead of external cut/grep
 # - Uses zsh/stat module for faster file operations
 #
-# @version 0.9.0
+# @version 0.9.1
 # @author  Steve Grunwell (Original Author)
 # @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
@@ -63,6 +63,8 @@ typeset -A ASIMOV_CONFIG=(
     [list_exclusions]="${ASIMOV_LIST_EXCLUSIONS:-false}"
     [init_cache]="${ASIMOV_INIT_CACHE:-false}"
     [status]="${ASIMOV_STATUS:-false}"
+    [status_truncate]="${ASIMOV_STATUS_TRUNCATE:-true}"
+    [status_truncate_len]="${ASIMOV_STATUS_TRUNCATE_LEN:-55}"
     [opt_cache]="${ASIMOV_OPT_CACHE:-false}"
     [opt_cache_file]="${ASIMOV_CACHE_FILE:-${HOME}/.cache/asimov-exclusions}"
     [opt_incremental]="${ASIMOV_OPT_INCREMENTAL:-false}"
@@ -369,13 +371,17 @@ show_service_status() {
     print "${CYAN}║${NC}  ${YELLOW}Recent Exclusions (last 5):${NC}                                  ${CYAN}║${NC}"
     
     if [[ -f "$cache_file" ]]; then
-        tail -5 "$cache_file" 2>/dev/null | while read -r path; do
-            # Truncate path if too long
-            if [[ ${#path} -gt 55 ]]; then
-                path="...${path: -52}"
+        local truncate="${ASIMOV_CONFIG[status_truncate]}"
+        local truncate_len="${ASIMOV_CONFIG[status_truncate_len]}"
+        
+        while read -r excl_path; do
+            # Truncate path if enabled and too long
+            if [[ "$truncate" == "true" ]] && [[ ${#excl_path} -gt $truncate_len ]]; then
+                local keep_len=$((truncate_len - 3))
+                excl_path="...${excl_path: -$keep_len}"
             fi
-            printf "${CYAN}║${NC}    %-57s${CYAN}║${NC}\n" "$path"
-        done
+            printf "${CYAN}║${NC}    %-57s${CYAN}║${NC}\n" "$excl_path"
+        done < <(tail -5 "$cache_file" 2>/dev/null)
     else
         printf "${CYAN}║${NC}    %-57s${CYAN}║${NC}\n" "(no cache file found)"
     fi
