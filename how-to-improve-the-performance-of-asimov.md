@@ -155,7 +155,7 @@ print "${COLORS[cyan]}Finding dependency directories...${COLORS[reset]}"
 Features:
 
 - **Global COLORS hash-map** - Single source of truth for all colors
-- **NO_COLOR support** - Respects https://no-color.org/ standard
+- **NO_COLOR support** - Respects <https://no-color.org/> standard
 - **TTY detection** - Colors disabled when output is piped/redirected
 - **No colors in logs** - Log files are always plain text
 - **Consistent usage** - All color codes use `${COLORS[name]}` pattern
