@@ -1,9 +1,12 @@
 #!/usr/bin/env zsh
 # =============================================================================
 # migrate-to-asimov-zsh.zsh
-# 
+#
 # Migration script from original asimov (Homebrew) to optimized asimov-zsh
 # Creates a tmux session for long-running full scan
+#
+# @author  Tobias Hochguertel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
+# @license MIT
 #
 # Usage: ./migrate-to-asimov-zsh.zsh [--dry-run]
 # =============================================================================
@@ -191,10 +194,10 @@ else
     if [[ -L /usr/local/bin/asimov ]]; then
         rm /usr/local/bin/asimov
     fi
-    
+
     # Create directory if needed
     sudo mkdir -p /usr/local/bin 2>/dev/null || true
-    
+
     # Create symlink
     ln -sf "${SCRIPT_DIR}/asimov-zsh" /usr/local/bin/asimov
     log_success "Symlinked asimov-zsh to /usr/local/bin/asimov"
@@ -270,10 +273,10 @@ if $DRY_RUN; then
 else
     # Kill existing session if present
     tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
-    
+
     # Create new tmux session
     tmux new-session -d -s "$SESSION_NAME" "zsh $TMUX_SCRIPT; rm $TMUX_SCRIPT"
-    
+
     log_success "Created tmux session: $SESSION_NAME"
     echo ""
     echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
@@ -304,7 +307,7 @@ if $DRY_RUN; then
     log_warn "[DRY-RUN] Would load ${SCRIPT_DIR}/com.tobiashochguertel.asimov-zsh.plist"
 else
     launchctl load "${SCRIPT_DIR}/com.tobiashochguertel.asimov-zsh.plist" 2>/dev/null || true
-    
+
     if launchctl list 2>/dev/null | grep -q "com.tobiashochguertel.asimov-zsh"; then
         log_success "Daemon loaded successfully"
     else

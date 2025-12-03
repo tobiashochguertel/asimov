@@ -325,11 +325,11 @@ Benefits:
 
 #### Performance Impact
 
-| Cache Method | Lookup Time | Memory Usage | Write Latency |
-|--------------|-------------|--------------|---------------|
-| grep file    | O(n)        | Low          | Per-operation |
-| Hash in memory | O(1)      | Medium       | Batch at end  |
-| SQLite       | O(log n)    | Low          | Transactional |
+| Cache Method   | Lookup Time | Memory Usage | Write Latency |
+|----------------|-------------|--------------|---------------|
+| grep file      | O(n)        | Low          | Per-operation |
+| Hash in memory | O(1)        | Medium       | Batch at end  |
+| SQLite         | O(log n)    | Low          | Transactional |
 
 **Recommendation**: For most users, the in-memory hash approach (implemented as `ASIMOV_OPT_CACHE`) is sufficient. SQLite is only needed for enterprise-scale deployments.
 
@@ -572,22 +572,22 @@ tmutil isexcluded /path/to/directory
 
 ### Performance Comparison: tmutil vs mdfind
 
-| Method | Speed | Scope | Requires sudo |
-|--------|-------|-------|---------------|
-| `tmutil isexcluded` | Fast (single) | One path | No |
-| `mdfind` query | Fast (all) | All exclusions | Yes (for complete list) |
-| `xattr -l` | Fast (single) | One path | No |
-| Loop with tmutil | Slow | Multiple paths | No |
+| Method              | Speed         | Scope          | Requires sudo           |
+|---------------------|---------------|----------------|-------------------------|
+| `tmutil isexcluded` | Fast (single) | One path       | No                      |
+| `mdfind` query      | Fast (all)    | All exclusions | Yes (for complete list) |
+| `xattr -l`          | Fast (single) | One path       | No                      |
+| Loop with tmutil    | Slow          | Multiple paths | No                      |
 
 **Recommendation**: Use `mdfind` to export all exclusions once, then use the cache for subsequent runs.
 
 ### Exclusion Types Summary
 
-| Type | Command | Stored In | Survives Move |
-|------|---------|-----------|---------------|
-| Sticky (xattr) | `tmutil addexclusion path` | Extended attribute on file | Yes |
-| Fixed-path | `tmutil addexclusion -p path` | System plist | No |
-| Volume | System default | TimeMachine plist | N/A |
+| Type           | Command                       | Stored In                  | Survives Move |
+|----------------|-------------------------------|----------------------------|---------------|
+| Sticky (xattr) | `tmutil addexclusion path`    | Extended attribute on file | Yes           |
+| Fixed-path     | `tmutil addexclusion -p path` | System plist               | No            |
+| Volume         | System default                | TimeMachine plist          | N/A           |
 
 The default `tmutil addexclusion` (without `-p`) is preferred for development directories because the exclusion "sticks" to the directory even if moved.
 
