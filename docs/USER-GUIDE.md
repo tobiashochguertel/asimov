@@ -307,7 +307,8 @@ Note: These stale entries don't cause problems—they're just references in Spot
 | `ASIMOV_INIT_CACHE` | `false` | Initialize cache from current exclusions |
 | `ASIMOV_STATUS` | `false` | Show service status and statistics |
 | `ASIMOV_OPT_CACHE` | `false` | Enable caching |
-| `ASIMOV_OPT_MMAP` | `false` | Use in-memory cache |
+| `ASIMOV_OPT_SQLITE` | `false` | Use SQLite cache (recommended for large lists) |
+| `ASIMOV_OPT_MMAP` | `false` | Use in-memory file cache |
 | `ASIMOV_OPT_SKIP_SIZE` | `false` | Don't calculate directory sizes |
 | `ASIMOV_OPT_INCREMENTAL` | `false` | Only scan recently modified dirs |
 | `ASIMOV_OPT_INCREMENTAL_DAYS` | `7` | Days threshold for incremental |
@@ -319,8 +320,6 @@ Note: These stale entries don't cause problems—they're just references in Spot
 | `ASIMOV_OPT_DUST` | `false` | Use dust instead of du for size |
 | `ASIMOV_LOG_FILE` | (empty) | Path to log file (empty = disabled) |
 | `ASIMOV_LOG_FORMAT` | `text` | Log format: `text` or `json` |
-| `ASIMOV_STATUS_TRUNCATE` | `true` | Truncate long paths in status output |
-| `ASIMOV_STATUS_TRUNCATE_LEN` | `55` | Max path length before truncation |
 | `NO_COLOR` | (unset) | Disable colors when set (any value) |
 
 ### Customize the Daemon
@@ -446,25 +445,38 @@ ASIMOV_LIST_EXCLUSIONS=true asimov | xargs -I{} du -sh {} 2>/dev/null
 # Run asimov manually
 asimov
 
+# Show help
+asimov --help
+
+# Show version
+asimov --version
+
 # Dry run (see what would be excluded)
-ASIMOV_DRY_RUN=true asimov
+asimov --dry-run
 
 # Verbose output
-ASIMOV_VERBOSE=true asimov
+asimov --verbose
 
 # List current exclusions
-ASIMOV_LIST_EXCLUSIONS=true asimov
+asimov --list
 
 # Initialize cache
-ASIMOV_INIT_CACHE=true asimov
+asimov --init-cache
 
 # Show service status and statistics
-ASIMOV_STATUS=true asimov
+asimov --status
 
 # Scan specific directory
-ASIMOV_ROOT=~/projects asimov
+asimov --root ~/projects
+asimov ~/projects  # shorthand
 
-# Enable logging
+# Enable SQLite cache
+asimov --sqlite --init-cache
+
+# Combine options
+asimov --dry-run --verbose
+
+# Enable logging (via environment)
 ASIMOV_LOG_FILE=~/.local/log/asimov.log asimov
 
 # Disable colors
@@ -481,6 +493,9 @@ tmutil removeexclusion /path/to/directory
 
 # List all Time Machine exclusions
 sudo mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'"
+
+# Upgrade to latest version
+cd ~/asimov && git pull && ./install.sh --upgrade
 ```
 
 ---

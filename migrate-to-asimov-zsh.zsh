@@ -351,7 +351,7 @@ echo -e "${GREEN}║                                                            
 echo -e "${GREEN}║  Next steps:                                                   ║${NC}"
 echo -e "${GREEN}║  1. Attach to tmux to monitor scan: ${CYAN}tmux attach -t ${SESSION_NAME}${NC}"
 echo -e "${GREEN}║  2. After scan completes, verify with:                         ║${NC}"
-echo -e "${GREEN}║     ${CYAN}ASIMOV_LIST_EXCLUSIONS=true asimov | wc -l${NC}"
+echo -e "${GREEN}║     ${CYAN}asimov --list | wc -l${NC}"
 echo -e "${GREEN}║                                                                ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""

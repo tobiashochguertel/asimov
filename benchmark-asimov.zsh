@@ -96,6 +96,7 @@ while [[ $# -gt 0 ]]; do
         print "  ASIMOV_OPT_DUST        Use dust instead of du (OPT 6)"
         print "  ASIMOV_OPT_SKIP_SIZE   Skip size calculation (OPT 6)"
         print "  ASIMOV_OPT_BATCH       Enable batch operations (OPT 7)"
+        print "  ASIMOV_OPT_SQLITE      Enable SQLite cache (OPT 15)"
         exit 0
         ;;
     *)
@@ -380,13 +381,13 @@ EOF
 ASIMOV_ROOT='$test_root' ASIMOV_DRY_RUN=true ASIMOV_VERBOSE=false ASIMOV_OPT_BATCH=true ${SCRIPT_DIR}/asimov-zsh 2>/dev/null | wc -l
 EOF
 
-    # All optimizations combined
+    # All optimizations combined (including SQLite)
     cat >"$all_wrapper" <<EOF
 #!/usr/bin/env zsh
-rm -f ~/.cache/asimov-exclusions 2>/dev/null
+rm -f ~/.cache/asimov-exclusions ~/.cache/asimov.db 2>/dev/null
 ASIMOV_ROOT='$test_root' ASIMOV_DRY_RUN=true ASIMOV_VERBOSE=false \
     ASIMOV_OPT_CACHE=true \
-    ASIMOV_OPT_MMAP=true \
+    ASIMOV_OPT_SQLITE=true \
     ASIMOV_OPT_INCREMENTAL=true \
     ASIMOV_OPT_PARALLEL=true \
     ASIMOV_OPT_GITIGNORE=true \

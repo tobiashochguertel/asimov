@@ -20,10 +20,11 @@ The optimized ZSH version offers several advantages:
 | Feature | Original (Bash) | Optimized (ZSH) |
 |---------|-----------------|-----------------|
 | Directory search | `find` (sequential) | `fd` (parallel, 2-3x faster) |
-| Exclusion lookup | `tmutil isexcluded` per dir | Cached in-memory (O(1)) |
+| Exclusion lookup | `tmutil isexcluded` per dir | SQLite cache (O(log n)) |
 | Size calculation | `du` (slow for large dirs) | Skippable or uses `dust` |
-| Configuration | Limited | Extensive via env variables |
+| Configuration | Limited | CLI args + env variables |
 | Progress info | Basic | Verbose mode available |
+| CLI interface | None | `--help`, `--status`, etc. |
 
 **Estimated performance improvement: 2-3x faster** on typical developer machines with many projects.
 
@@ -113,20 +114,20 @@ cd ~/asimov-fork  # or wherever you cloned/updated
 ```
 
 This will:
-- Symlink `asimov-zsh` to `/usr/local/bin/asimov`
-- Load the new launchd daemon with optimizations enabled
+- Copy `asimov-zsh` to `/usr/local/bin/asimov`
+- Load the new launchd daemon with optimizations enabled (SQLite, batch, logging)
+- Initialize SQLite cache from existing exclusions
 - Run asimov-zsh for the first time
 
-### Step 5: Initialize the Cache
-
-For optimal performance, initialize the cache from your existing exclusions:
+### Step 5: Verify Installation
 
 ```bash
-# Initialize cache from current Time Machine exclusions
-ASIMOV_INIT_CACHE=true asimov
-```
+# Check status
+asimov --status
 
-This pre-populates the cache so subsequent runs are faster.
+# Verify cache was initialized
+asimov --list | wc -l
+```
 
 ---
 
@@ -138,7 +139,7 @@ Your existing Time Machine exclusions are **automatically preserved**. They are 
 
 ```bash
 # List current exclusions in your home directory
-ASIMOV_ROOT=~ ASIMOV_LIST_EXCLUSIONS=true ASIMOV_VERBOSE=true asimov
+asimov --list --verbose
 
 # Compare with your backup
 diff <(sort ~/Desktop/tm-exclusions-backup.txt) \
@@ -179,7 +180,7 @@ launchctl list | grep asimov
 
 ```bash
 # Scan your home directory without making changes
-ASIMOV_DRY_RUN=true ASIMOV_VERBOSE=true asimov
+asimov --dry-run --verbose
 ```
 
 ### Test 3: Verify Exclusion Count
@@ -275,8 +276,8 @@ log show --predicate 'subsystem == "com.apple.launchd"' --last 5m | grep asimov
 
 ```bash
 # Clear the cache and reinitialize
-rm ~/.cache/asimov-exclusions
-ASIMOV_INIT_CACHE=true asimov
+rm -f ~/.cache/asimov-exclusions ~/.cache/asimov.db
+asimov --init-cache
 ```
 
 ---
