@@ -46,11 +46,11 @@
     },
     "scripts": {
       "test": "sh tests/bin/run-tests.sh",
-      "test:zsh": "zsh -n asimov-zsh && ASIMOV_DRY_RUN=true ./asimov-zsh"
+      "test:zsh": "zsh tests/bin/run-zsh-tests.zsh"
     },
     "scripts-descriptions": {
       "test": "Run the automated tests for Asimov (bash version).",
-      "test:zsh": "Run syntax check and dry-run test for asimov-zsh."
+      "test:zsh": "Run the ZSH test suite for asimov-zsh."
     },
     "config": {
         "preferred-install": "dist",

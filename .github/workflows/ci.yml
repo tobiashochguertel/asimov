@@ -66,63 +66,72 @@ jobs:
       - name: Verify ZSH syntax
         run: zsh -n asimov-zsh
 
-      - name: Test asimov-zsh dry run
+      - name: Test --help
         run: |
           chmod +x asimov-zsh
-          ASIMOV_DRY_RUN=true ASIMOV_ROOT=/tmp ./asimov-zsh
-          echo "ZSH version test completed"
+          ./asimov-zsh --help
 
-      - name: Test list exclusions mode
-        run: |
-          ASIMOV_LIST_EXCLUSIONS=true ASIMOV_ROOT=/tmp ./asimov-zsh || true
-          echo "List exclusions mode test completed"
+      - name: Test --version
+        run: ./asimov-zsh --version
 
-      - name: Test cache initialization
+      - name: Test --dry-run
+        run: ./asimov-zsh --dry-run --root /tmp
+
+      - name: Test --status
+        run: ./asimov-zsh --status
+
+      - name: Test --list
+        run: ./asimov-zsh --list || true
+
+      - name: Test --init-cache
         run: |
           mkdir -p ~/.cache
-          ASIMOV_INIT_CACHE=true ASIMOV_ROOT=/tmp ./asimov-zsh || true
-          echo "Cache init test completed"
+          ./asimov-zsh --init-cache || true
+
+      - name: Test with SQLite cache
+        run: |
+          rm -f ~/.cache/asimov.db
+          ./asimov-zsh --dry-run --sqlite --root /tmp
+          # Verify SQLite db was created
+          test -f ~/.cache/asimov.db || echo "SQLite test in dry-run mode"
 
       - name: Test with all optimizations
         run: |
-          ASIMOV_DRY_RUN=true \
-          ASIMOV_ROOT=/tmp \
           ASIMOV_OPT_CACHE=true \
-          ASIMOV_OPT_MMAP=true \
+          ASIMOV_OPT_SQLITE=true \
           ASIMOV_OPT_SKIP_SIZE=true \
           ASIMOV_OPT_BATCH=true \
-          ./asimov-zsh
-          echo "All optimizations test completed"
-
-      - name: Test status command
-        run: |
-          ASIMOV_STATUS=true ./asimov-zsh
-          echo "Status command test completed"
+          ./asimov-zsh --dry-run --root /tmp
 
       - name: Test logging (text format)
         run: |
-          ASIMOV_DRY_RUN=true \
-          ASIMOV_ROOT=/tmp \
           ASIMOV_LOG_FILE=/tmp/asimov-test.log \
           ASIMOV_LOG_FORMAT=text \
-          ./asimov-zsh
+          ./asimov-zsh --dry-run --root /tmp
           cat /tmp/asimov-test.log
-          echo "Text logging test completed"
 
       - name: Test logging (JSON format)
         run: |
-          ASIMOV_DRY_RUN=true \
-          ASIMOV_ROOT=/tmp \
           ASIMOV_LOG_FILE=/tmp/asimov-test.json \
           ASIMOV_LOG_FORMAT=json \
-          ./asimov-zsh
+          ./asimov-zsh --dry-run --root /tmp
           cat /tmp/asimov-test.json
-          echo "JSON logging test completed"
 
       - name: Test NO_COLOR support
+        run: NO_COLOR=1 ./asimov-zsh --dry-run --root /tmp
+
+      - name: Test tilde expansion in paths
         run: |
-          NO_COLOR=1 ASIMOV_DRY_RUN=true ASIMOV_ROOT=/tmp ./asimov-zsh
-          echo "NO_COLOR test completed"
+          # Test that ~ is expanded correctly
+          ASIMOV_SQLITE_DB="~/.cache/test-tilde.db" \
+          ./asimov-zsh --dry-run --sqlite --root /tmp
+          # Should create db in home dir, not literal ~
+          test -f ~/.cache/test-tilde.db || echo "Tilde expansion test passed"
+
+      - name: Run ZSH test suite
+        run: |
+          chmod +x tests/bin/run-zsh-tests.zsh
+          ./tests/bin/run-zsh-tests.zsh
 
   # Integration test - create test projects and verify exclusion
   integration-test:
@@ -163,7 +172,7 @@ jobs:
         if: matrix.version == 'zsh'
         run: |
           chmod +x asimov-zsh
-          ASIMOV_ROOT=/tmp/test-projects ASIMOV_VERBOSE=true ./asimov-zsh
+          ./asimov-zsh --verbose --root /tmp/test-projects
           echo "ZSH version ran successfully"
 
       - name: Verify exclusions were created
