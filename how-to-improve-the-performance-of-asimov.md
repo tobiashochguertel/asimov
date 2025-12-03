@@ -17,7 +17,7 @@ This document outlines strategies and optimizations to improve the performance o
 | 9  | Use `.gitignore` Awareness                     | ✅ Done | `ASIMOV_OPT_GITIGNORE` flag                                   |
 | 10 | Memory-Mapped File Operations (In-Memory Hash) | ✅ Done | `ASIMOV_OPT_MMAP` with `MMAP_CACHE`                           |
 | 11 | Alternative to `du` (dust)                     | ✅ Done | `ASIMOV_OPT_DUST` flag                                        |
-| 12 | Configuration Refactoring                      | ❌ Open | Refactor to associative array with sensible defaults          |
+| 12 | Configuration Refactoring                      | ✅ Done | `ASIMOV_CONFIG` associative array with sensible defaults      |
 | 13 | Service Status & Monitoring                    | ❌ Open | `asimov --status` for launchd service info                    |
 | 14 | Logging System                                 | ❌ Open | Text and JSON logging with `ASIMOV_LOG_FILE`                  |
 | 15 | SQLite Cache                                   | ❌ Open | Not implemented (recommended for 100,000+ exclusions)         |
@@ -25,65 +25,6 @@ This document outlines strategies and optimizations to improve the performance o
 ## Open
 
 The following improvements are not yet implemented in `asimov-zsh`:
-
-### Configuration Refactoring to Associative Array
-
-Refactor the script's configuration approach from individual environment variables to a centralized associative array (hash-map) with sensible defaults. This improves maintainability and makes configuration more consistent.
-
-**Current approach:**
-
-```zsh
-readonly ASIMOV_ROOT="${ASIMOV_ROOT:-$HOME}"
-readonly ASIMOV_DRY_RUN="${ASIMOV_DRY_RUN:-false}"
-readonly ASIMOV_OPT_CACHE="${ASIMOV_OPT_CACHE:-false}"
-# ... many more individual variables
-```
-
-**Proposed approach:**
-
-```zsh
-# Declare configuration with defaults
-typeset -A ASIMOV_CONFIG=(
-    [root]="${ASIMOV_ROOT:-$HOME}"
-    [dry_run]="${ASIMOV_DRY_RUN:-false}"
-    [verbose]="${ASIMOV_VERBOSE:-false}"
-    [opt_cache]="${ASIMOV_OPT_CACHE:-false}"
-    [opt_cache_file]="${ASIMOV_CACHE_FILE:-${HOME}/.cache/asimov-exclusions}"
-    [opt_incremental]="${ASIMOV_OPT_INCREMENTAL:-false}"
-    [opt_incremental_days]="${ASIMOV_OPT_INCREMENTAL_DAYS:-7}"
-    [opt_parallel]="${ASIMOV_OPT_PARALLEL:-false}"
-    [opt_parallel_jobs]="${ASIMOV_OPT_PARALLEL_JOBS:-4}"
-    [opt_gitignore]="${ASIMOV_OPT_GITIGNORE:-false}"
-    [opt_dust]="${ASIMOV_OPT_DUST:-false}"
-    [opt_skip_size]="${ASIMOV_OPT_SKIP_SIZE:-false}"
-    [opt_mmap]="${ASIMOV_OPT_MMAP:-false}"
-    [opt_batch]="${ASIMOV_OPT_BATCH:-false}"
-    [opt_batch_size]="${ASIMOV_OPT_BATCH_SIZE:-50}"
-    [log_file]="${ASIMOV_LOG_FILE:-}"
-    [log_format]="${ASIMOV_LOG_FORMAT:-text}"
-)
-
-# Access via: ${ASIMOV_CONFIG[opt_cache]}
-```
-
-Benefits:
-
-- **Single source of truth** - All configuration in one place
-- **Easier to extend** - Add new options without adding new variables
-- **Consistent access pattern** - `${ASIMOV_CONFIG[key]}` everywhere
-- **Easier testing** - Can override entire config array for tests
-- **Better documentation** - Config structure is self-documenting
-
-**Files requiring updates:**
-
-- `asimov-zsh` - Main script refactoring
-- `benchmark-asimov.zsh` - Update environment variable handling
-- `com.tobiashochguertel.asimov-zsh.plist` - Update EnvironmentVariables section
-- `install.sh` - Update any config references
-- `migrate-to-asimov-zsh.zsh` - Update environment variable exports
-- `tests/**` - Update test configuration
-- `docs/**` - Update documentation
-- `README.md` - Update configuration documentation
 
 ### Service Status and Monitoring
 
@@ -237,6 +178,39 @@ Benefits:
 ## Done
 
 The following improvements have been implemented in `asimov-zsh`:
+
+### Configuration Refactoring to Associative Array
+
+Refactored the script's configuration approach from individual environment variables to a centralized `ASIMOV_CONFIG` associative array (hash-map) with sensible defaults.
+
+**Implementation**: All configuration is now stored in `ASIMOV_CONFIG` and accessed via `${ASIMOV_CONFIG[key]}`.
+
+```zsh
+typeset -A ASIMOV_CONFIG=(
+    [root]="${ASIMOV_ROOT:-$HOME}"
+    [dry_run]="${ASIMOV_DRY_RUN:-false}"
+    [verbose]="${ASIMOV_VERBOSE:-false}"
+    [opt_cache]="${ASIMOV_OPT_CACHE:-false}"
+    [opt_cache_file]="${ASIMOV_CACHE_FILE:-${HOME}/.cache/asimov-exclusions}"
+    [opt_incremental]="${ASIMOV_OPT_INCREMENTAL:-false}"
+    [opt_incremental_days]="${ASIMOV_OPT_INCREMENTAL_DAYS:-7}"
+    [opt_parallel]="${ASIMOV_OPT_PARALLEL:-false}"
+    [opt_parallel_jobs]="${ASIMOV_OPT_PARALLEL_JOBS:-4}"
+    [opt_gitignore]="${ASIMOV_OPT_GITIGNORE:-false}"
+    [opt_dust]="${ASIMOV_OPT_DUST:-false}"
+    [opt_skip_size]="${ASIMOV_OPT_SKIP_SIZE:-false}"
+    [opt_mmap]="${ASIMOV_OPT_MMAP:-false}"
+    [opt_batch]="${ASIMOV_OPT_BATCH:-false}"
+    [opt_batch_size]="${ASIMOV_OPT_BATCH_SIZE:-50}"
+)
+```
+
+Benefits:
+
+- **Single source of truth** - All configuration in one place
+- **Easier to extend** - Add new options without adding new variables
+- **Consistent access pattern** - `${ASIMOV_CONFIG[key]}` everywhere
+- **Backward compatible** - Still reads from environment variables
 
 ### Batch Operations
 
