@@ -284,6 +284,7 @@ log_msg() {
 log_info() {
     log_msg "INFO" "$1" "${2:-}" "${3:-}"
     [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "[INFO] $1"
+    return 0
 }
 
 log_excl() {
@@ -679,8 +680,9 @@ typeset -a MMAP_NEW_ENTRIES=()
 sqlite_init_db() {
     local db="${ASIMOV_CONFIG[opt_sqlite_db]}"
     mkdir -p "${db:h}" 2>/dev/null || true
-    sqlite3 "$db" "CREATE TABLE IF NOT EXISTS exclusions (path TEXT PRIMARY KEY)" 2>/dev/null
+    sqlite3 "$db" "CREATE TABLE IF NOT EXISTS exclusions (path TEXT PRIMARY KEY)" 2>/dev/null || true
     [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "SQLite database initialized: $db"
+    return 0
 }
 
 sqlite_is_cached() {

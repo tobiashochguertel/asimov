@@ -147,10 +147,11 @@ print_header "SQLite Cache Tests"
 # Clean up any existing test db
 rm -f "$TEST_DIR/test.db"
 
-# Note: The --sqlite flag may behave differently in non-TTY environments
-# Just test that the flag is recognized (doesn't cause unknown option error)
-run_test "--sqlite flag is recognized" \
-    "$ASIMOV_ZSH --help | grep -q '\-\-sqlite'"
+run_test "--sqlite flag works with dry-run" \
+    "$ASIMOV_ZSH --dry-run --sqlite --root /tmp"
+
+run_test "--sqlite with verbose works" \
+    "$ASIMOV_ZSH --dry-run --sqlite --verbose --root /tmp"
 
 run_test "SQLite db is created with init-cache" \
     "ASIMOV_SQLITE_DB='$TEST_DIR/test.db' $ASIMOV_ZSH --sqlite --init-cache 2>/dev/null; [[ -f '$TEST_DIR/test.db' ]]"
