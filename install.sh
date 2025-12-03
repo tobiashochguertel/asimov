@@ -127,7 +127,8 @@ upgrade() {
     if [[ -x "${INSTALL_BIN}/asimov" ]]; then
         current_version=$(grep -m1 "# @version" "${INSTALL_BIN}/asimov" 2>/dev/null | awk '{print $3}' || echo "unknown")
     fi
-    local new_version=$(grep -m1 "# @version" "${DIR}/asimov-zsh" 2>/dev/null | awk '{print $3}' || echo "unknown")
+    local new_version
+    new_version=$(grep -m1 "# @version" "${DIR}/asimov-zsh" 2>/dev/null | awk '{print $3}' || echo "unknown")
     
     echo -e "  Current version: ${YELLOW}${current_version:-not installed}${NC}"
     echo -e "  New version:     ${GREEN}${new_version}${NC}"
