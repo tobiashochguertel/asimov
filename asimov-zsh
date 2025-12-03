@@ -12,7 +12,7 @@
 # - ZSH native string manipulation instead of external cut/grep
 # - Uses zsh/stat module for faster file operations
 #
-# @version 0.9.1
+# @version 0.10.0
 # @author  Steve Grunwell (Original Author)
 # @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
@@ -25,6 +25,35 @@ zmodload zsh/stat 2>/dev/null || true
 zmodload zsh/datetime 2>/dev/null || true
 zmodload zsh/parameter 2>/dev/null || true
 zmodload zsh/zutil 2>/dev/null || true
+
+# =============================================================================
+# Color System - Global color hash-map with NO_COLOR support
+# =============================================================================
+# Respects the NO_COLOR standard (https://no-color.org/):
+# - When NO_COLOR env var is set, all colors are disabled
+# - When output is not a TTY (piped/redirected), colors are disabled
+# =============================================================================
+
+typeset -A COLORS
+if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
+    COLORS=(
+        [reset]='\033[0m'
+        [red]='\033[0;31m'
+        [green]='\033[0;32m'
+        [yellow]='\033[0;33m'
+        [blue]='\033[0;34m'
+        [magenta]='\033[0;35m'
+        [cyan]='\033[0;36m'
+        [white]='\033[0;37m'
+        [bold]='\033[1m'
+    )
+else
+    # NO_COLOR mode or non-TTY - empty strings for all colors
+    COLORS=(
+        [reset]='' [red]='' [green]='' [yellow]=''
+        [blue]='' [magenta]='' [cyan]='' [white]='' [bold]=''
+    )
+fi
 
 # =============================================================================
 # Configuration - Centralized associative array with sensible defaults
@@ -153,7 +182,7 @@ log_skip() {
 
 log_error() {
     log_msg "ERROR" "$1" "error" "${2:-}"
-    print -- "\033[0;31m[ERROR] $1\033[0m" >&2
+    print -- "${COLORS[red]}[ERROR] $1${COLORS[reset]}" >&2
 }
 
 log_scan_start() {
@@ -189,7 +218,7 @@ log_scan_complete() {
 # List Exclusions Mode - Uses mdfind for comprehensive listing
 # =============================================================================
 list_current_exclusions() {
-    print "\033[0;36mRetrieving current Time Machine exclusions...\033[0m\n"
+    print "${COLORS[cyan]}Retrieving current Time Machine exclusions...${COLORS[reset]}\n"
     
     local root_filter="${ASIMOV_CONFIG[root]}"
     local total_count
@@ -202,14 +231,14 @@ list_current_exclusions() {
     
     total_count=$(echo "$all_exclusions" | wc -l | tr -d ' ')
     
-    print "\033[0;35mTotal Time Machine exclusions: $total_count\033[0m"
+    print "${COLORS[magenta]}Total Time Machine exclusions: $total_count${COLORS[reset]}"
     
     if [[ -n "$root_filter" ]]; then
         local filtered
         filtered=$(echo "$all_exclusions" | grep "^$root_filter" 2>/dev/null)
         filtered_count=$(echo "$filtered" | grep -c . 2>/dev/null || echo "0")
         
-        print "\033[0;35mExclusions in $root_filter: $filtered_count\033[0m\n"
+        print "${COLORS[magenta]}Exclusions in $root_filter: $filtered_count${COLORS[reset]}\n"
         
         if [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]]; then
             # Show by type
@@ -235,7 +264,7 @@ list_current_exclusions() {
 # Initialize Cache Mode - Populate cache from current exclusions
 # =============================================================================
 init_cache_from_exclusions() {
-    print "\033[0;36mInitializing cache from current Time Machine exclusions...\033[0m\n"
+    print "${COLORS[cyan]}Initializing cache from current Time Machine exclusions...${COLORS[reset]}\n"
     
     mkdir -p "${ASIMOV_CONFIG[opt_cache_file]:h}" 2>/dev/null || true
     
@@ -248,7 +277,7 @@ init_cache_from_exclusions() {
     # Write to cache file
     echo "$exclusions" > "${ASIMOV_CONFIG[opt_cache_file]}"
     
-    print "\033[0;32mCache initialized with $count exclusions\033[0m"
+    print "${COLORS[green]}Cache initialized with $count exclusions${COLORS[reset]}"
     print "Cache file: ${ASIMOV_CONFIG[opt_cache_file]}"
 }
 
@@ -261,20 +290,20 @@ show_service_status() {
     local status_file="${ASIMOV_CONFIG[status_file]}"
     local cache_file="${ASIMOV_CONFIG[opt_cache_file]}"
     
-    # Colors
-    local GREEN='\033[0;32m'
-    local RED='\033[0;31m'
-    local YELLOW='\033[0;33m'
-    local CYAN='\033[0;36m'
-    local NC='\033[0m'
+    # Use global COLORS hash-map
+    local C_CYAN="${COLORS[cyan]}"
+    local C_GREEN="${COLORS[green]}"
+    local C_RED="${COLORS[red]}"
+    local C_YELLOW="${COLORS[yellow]}"
+    local C_RESET="${COLORS[reset]}"
     
-    print "${CYAN}╔═══════════════════════════════════════════════════════════════╗${NC}"
-    print "${CYAN}║                    Asimov-ZSH Status                          ║${NC}"
-    print "${CYAN}╠═══════════════════════════════════════════════════════════════╣${NC}"
+    print "${C_CYAN}╔═══════════════════════════════════════════════════════════════╗${C_RESET}"
+    print "${C_CYAN}║                    Asimov-ZSH Status                          ║${C_RESET}"
+    print "${C_CYAN}╠═══════════════════════════════════════════════════════════════╣${C_RESET}"
     
     # Check launchd service status
     local service_status="Not Loaded"
-    local status_color="${RED}"
+    local status_color="${C_RED}"
     
     if launchctl list 2>/dev/null | grep -q "$service_name"; then
         local launchctl_info=$(launchctl list "$service_name" 2>/dev/null)
@@ -283,15 +312,15 @@ show_service_status() {
         
         if [[ "$exit_status" == "0" ]] || [[ -z "$exit_status" ]]; then
             service_status="Loaded (Last exit: success)"
-            status_color="${GREEN}"
+            status_color="${C_GREEN}"
         else
             service_status="Loaded (Last exit: $exit_status)"
-            status_color="${YELLOW}"
+            status_color="${C_YELLOW}"
         fi
     fi
     
-    printf "${CYAN}║${NC}  Service:     %-47s${CYAN}║${NC}\n" "$service_name"
-    printf "${CYAN}║${NC}  Status:      ${status_color}%-47s${NC}${CYAN}║${NC}\n" "$service_status"
+    printf "${C_CYAN}║${C_RESET}  Service:     %-47s${C_CYAN}║${C_RESET}\n" "$service_name"
+    printf "${C_CYAN}║${C_RESET}  Status:      ${status_color}%-47s${C_RESET}${C_CYAN}║${C_RESET}\n" "$service_status"
     
     # Check plist for schedule
     local schedule_info="Unknown"
@@ -302,7 +331,7 @@ show_service_status() {
             schedule_info="Every ${hours} hours"
         fi
     fi
-    printf "${CYAN}║${NC}  Schedule:    %-47s${CYAN}║${NC}\n" "$schedule_info"
+    printf "${C_CYAN}║${C_RESET}  Schedule:    %-47s${C_CYAN}║${C_RESET}\n" "$schedule_info"
     
     # Read status file for last run info
     local last_run="Never"
@@ -340,35 +369,35 @@ show_service_status() {
         fi
     fi
     
-    printf "${CYAN}║${NC}  Last Run:    %-47s${CYAN}║${NC}\n" "${last_run} ${relative_time}"
+    printf "${C_CYAN}║${C_RESET}  Last Run:    %-47s${C_CYAN}║${C_RESET}\n" "${last_run} ${relative_time}"
     
-    print "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
-    print "${CYAN}║${NC}  ${YELLOW}Statistics:${NC}                                                  ${CYAN}║${NC}"
+    print "${C_CYAN}║${C_RESET}                                                               ${C_CYAN}║${C_RESET}"
+    print "${C_CYAN}║${C_RESET}  ${C_YELLOW}Statistics:${C_RESET}                                                  ${C_CYAN}║${C_RESET}"
     
     # Get total exclusions from mdfind
     local total_exclusions=$(mdfind "com_apple_backup_excludeItem = 'com.apple.backupd'" 2>/dev/null | wc -l | tr -d ' ')
-    printf "${CYAN}║${NC}    Total TM exclusions:    %-35s${CYAN}║${NC}\n" "$total_exclusions"
+    printf "${C_CYAN}║${C_RESET}    Total TM exclusions:    %-35s${C_CYAN}║${C_RESET}\n" "$total_exclusions"
     
     # Get cache entries
     local cache_entries="0"
     if [[ -f "$cache_file" ]]; then
         cache_entries=$(wc -l < "$cache_file" 2>/dev/null | tr -d ' ')
     fi
-    printf "${CYAN}║${NC}    Cache entries:          %-35s${CYAN}║${NC}\n" "$cache_entries"
+    printf "${C_CYAN}║${C_RESET}    Cache entries:          %-35s${C_CYAN}║${C_RESET}\n" "$cache_entries"
     
     if [[ "$last_duration" != "N/A" ]] && [[ "$last_duration" != "null" ]]; then
-        printf "${CYAN}║${NC}    Last scan duration:     %-35s${CYAN}║${NC}\n" "${last_duration}s"
+        printf "${C_CYAN}║${C_RESET}    Last scan duration:     %-35s${C_CYAN}║${C_RESET}\n" "${last_duration}s"
     fi
     if [[ "$dirs_scanned" != "N/A" ]] && [[ "$dirs_scanned" != "null" ]]; then
-        printf "${CYAN}║${NC}    Directories scanned:    %-35s${CYAN}║${NC}\n" "$dirs_scanned"
+        printf "${C_CYAN}║${C_RESET}    Directories scanned:    %-35s${C_CYAN}║${C_RESET}\n" "$dirs_scanned"
     fi
     if [[ "$dirs_excluded" != "N/A" ]] && [[ "$dirs_excluded" != "null" ]]; then
-        printf "${CYAN}║${NC}    Directories excluded:   %-35s${CYAN}║${NC}\n" "$dirs_excluded"
+        printf "${C_CYAN}║${C_RESET}    Directories excluded:   %-35s${C_CYAN}║${C_RESET}\n" "$dirs_excluded"
     fi
     
     # Show recent exclusions from cache
-    print "${CYAN}║${NC}                                                               ${CYAN}║${NC}"
-    print "${CYAN}║${NC}  ${YELLOW}Recent Exclusions (last 5):${NC}                                  ${CYAN}║${NC}"
+    print "${C_CYAN}║${C_RESET}                                                               ${C_CYAN}║${C_RESET}"
+    print "${C_CYAN}║${C_RESET}  ${C_YELLOW}Recent Exclusions (last 5):${C_RESET}                                  ${C_CYAN}║${C_RESET}"
     
     if [[ -f "$cache_file" ]]; then
         local truncate="${ASIMOV_CONFIG[status_truncate]}"
@@ -380,13 +409,13 @@ show_service_status() {
                 local keep_len=$((truncate_len - 3))
                 excl_path="...${excl_path: -$keep_len}"
             fi
-            printf "${CYAN}║${NC}    %-57s${CYAN}║${NC}\n" "$excl_path"
+            printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "$excl_path"
         done < <(tail -5 "$cache_file" 2>/dev/null)
     else
-        printf "${CYAN}║${NC}    %-57s${CYAN}║${NC}\n" "(no cache file found)"
+        printf "${C_CYAN}║${C_RESET}    %-57s${C_CYAN}║${C_RESET}\n" "(no cache file found)"
     fi
     
-    print "${CYAN}╚═══════════════════════════════════════════════════════════════╝${NC}"
+    print "${C_CYAN}╚═══════════════════════════════════════════════════════════════╝${C_RESET}"
 }
 
 # Save run status to JSON file (called at end of scan)
@@ -820,11 +849,11 @@ exclude_path_parallel() {
 
 # Print configuration status
 print_config() {
-    print "\n\033[0;36mFinding dependency directories in ${ASIMOV_CONFIG[root]}…\033[0m"
-    [[ "${ASIMOV_CONFIG[dry_run]}" == "true" ]] && print "\033[0;33m[DRY-RUN MODE - no changes will be made]\033[0m"
+    print "\n${COLORS[cyan]}Finding dependency directories in ${ASIMOV_CONFIG[root]}…${COLORS[reset]}"
+    [[ "${ASIMOV_CONFIG[dry_run]}" == "true" ]] && print "${COLORS[yellow]}[DRY-RUN MODE - no changes will be made]${COLORS[reset]}"
     
     if [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]]; then
-        print "\033[0;35mOptimizations enabled:\033[0m"
+        print "${COLORS[magenta]}Optimizations enabled:${COLORS[reset]}"
         [[ "${ASIMOV_CONFIG[opt_cache]}" == "true" ]] && print "  - Caching (OPT 1): ${ASIMOV_CONFIG[opt_cache_file]}"
         [[ "${ASIMOV_CONFIG[opt_incremental]}" == "true" ]] && print "  - Incremental scan (OPT 2): ${ASIMOV_CONFIG[opt_incremental_days]} days"
         [[ "${ASIMOV_CONFIG[opt_parallel]}" == "true" ]] && print "  - Parallel tmutil (OPT 3): ${ASIMOV_CONFIG[opt_parallel_jobs]} jobs"
@@ -938,6 +967,6 @@ fi
 if [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && [[ "${ASIMOV_CONFIG[opt_cache]}" == "true" ]] && [[ -f "${ASIMOV_CONFIG[opt_cache_file]}" ]]; then
     local cache_count
     cache_count=$(wc -l < "${ASIMOV_CONFIG[opt_cache_file]}" | tr -d ' ')
-    print "\n\033[0;35mCache statistics: $cache_count entries in ${ASIMOV_CONFIG[opt_cache_file]}\033[0m"
-    print "\033[0;35mScan completed in ${SCAN_DURATION}s (${SCAN_DIRS_FOUND} dirs found, ${SCAN_DIRS_EXCLUDED} newly excluded)\033[0m"
+    print "\n${COLORS[magenta]}Cache statistics: $cache_count entries in ${ASIMOV_CONFIG[opt_cache_file]}${COLORS[reset]}"
+    print "${COLORS[magenta]}Scan completed in ${SCAN_DURATION}s (${SCAN_DIRS_FOUND} dirs found, ${SCAN_DIRS_EXCLUDED} newly excluded)${COLORS[reset]}"
 fi

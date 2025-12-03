@@ -21,6 +21,7 @@ This document outlines strategies and optimizations to improve the performance o
 | 13 | Service Status & Monitoring                    | ✅ Done | `ASIMOV_STATUS=true` for launchd service info                 |
 | 14 | Logging System                                 | ✅ Done | Text and JSON logging with `ASIMOV_LOG_FILE`                  |
 | 15 | SQLite Cache                                   | ❌ Open | Not implemented (recommended for 100,000+ exclusions)         |
+| 16 | Color System Refactoring                       | ✅ Done | Global COLORS hash-map, NO_COLOR support, no colors in logs   |
 
 ## Open
 
@@ -53,7 +54,7 @@ Added a status command to check the running state of the `asimov-zsh` launchd se
 
 **Implementation**: `ASIMOV_STATUS=true ./asimov-zsh` or set the environment variable.
 
-```
+```text
 ╔═══════════════════════════════════════════════════════════════╗
 ║                    Asimov-ZSH Status                          ║
 ╠═══════════════════════════════════════════════════════════════╣
@@ -61,16 +62,16 @@ Added a status command to check the running state of the `asimov-zsh` launchd se
 ║  Status:      Loaded (Last exit: success)                     ║
 ║  Schedule:    Every 24 hours                                  ║
 ║  Last Run:    2025-12-03T14:30:00 (2 hours ago)               ║
-║                                                                ║
-║  Statistics:                                                   ║
-║    Total TM exclusions:    1,234                               ║
-║    Cache entries:          1,100                               ║
-║    Last scan duration:     45s                                 ║
-║                                                                ║
-║  Recent Exclusions (last 5):                                   ║
-║    ~/work/project-a/node_modules                               ║
-║    ~/work/project-b/target                                     ║
-║    ...                                                         ║
+║                                                               ║
+║  Statistics:                                                  ║
+║    Total TM exclusions:    1,234                              ║
+║    Cache entries:          1,100                              ║
+║    Last scan duration:     45s                                ║
+║                                                               ║
+║  Recent Exclusions (last 5):                                  ║
+║    ~/work/project-a/node_modules                              ║
+║    ~/work/project-b/target                                    ║
+║    ...                                                        ║
 ╚═══════════════════════════════════════════════════════════════╝
 ```
 
@@ -87,12 +88,14 @@ Features:
 Added comprehensive logging support for debugging and monitoring, especially useful when running as a launchd service.
 
 **Configuration:**
+
 ```zsh
 ASIMOV_LOG_FILE=~/.local/log/asimov.log
 ASIMOV_LOG_FORMAT=text  # or "json"
 ```
 
 **Text log format:**
+
 ```log
 [2025-12-03T14:15:23+0100] [INFO] Starting asimov-zsh scan (root: /Users/tobias, opts: cache,mmap)
 [2025-12-03T14:15:24+0100] [EXCL] /Users/tobias/work/project/node_modules (45M)
@@ -101,6 +104,7 @@ ASIMOV_LOG_FORMAT=text  # or "json"
 ```
 
 **JSON log format:**
+
 ```json
 {"timestamp":"2025-12-03T14:15:23+0100","level":"INFO","event":"scan_start","message":"Starting asimov-zsh scan","root":"/Users/tobias","optimizations":"cache,mmap"}
 {"timestamp":"2025-12-03T14:15:24+0100","level":"EXCL","event":"excluded","message":"Excluded: /Users/tobias/work/project/node_modules","path":"/Users/tobias/work/project/node_modules","size":"45M"}
@@ -115,6 +119,46 @@ Features:
 - **log_error()** - Error messages (also prints to stderr)
 - **log_scan_start()** - Scan start with configuration
 - **log_scan_complete()** - Scan completion with statistics
+
+### Color System Refactoring
+
+Refactored the script to use a consistent approach for terminal colors using a global `COLORS` hash-map with NO_COLOR support.
+
+**Implementation:**
+
+```zsh
+typeset -A COLORS
+if [[ -z "${NO_COLOR:-}" ]] && [[ -t 1 ]]; then
+    COLORS=(
+        [reset]='\033[0m'
+        [red]='\033[0;31m'
+        [green]='\033[0;32m'
+        [yellow]='\033[0;33m'
+        [blue]='\033[0;34m'
+        [magenta]='\033[0;35m'
+        [cyan]='\033[0;36m'
+        [white]='\033[0;37m'
+        [bold]='\033[1m'
+    )
+else
+    # NO_COLOR mode or non-TTY - empty strings
+    COLORS=(
+        [reset]='' [red]='' [green]='' [yellow]=''
+        [blue]='' [magenta]='' [cyan]='' [white]='' [bold]=''
+    )
+fi
+
+# Usage:
+print "${COLORS[cyan]}Finding dependency directories...${COLORS[reset]}"
+```
+
+Features:
+
+- **Global COLORS hash-map** - Single source of truth for all colors
+- **NO_COLOR support** - Respects https://no-color.org/ standard
+- **TTY detection** - Colors disabled when output is piped/redirected
+- **No colors in logs** - Log files are always plain text
+- **Consistent usage** - All color codes use `${COLORS[name]}` pattern
 
 ### Configuration Refactoring to Associative Array
 
