@@ -7,7 +7,7 @@
 
 > Those people who think they know everything are a great annoyance to those of us who do.<br>— Isaac Asimov
 
-For macOS users, [Time Machine](https://support.apple.com/en-us/HT201250) is a no-frills, set-it-and-forget-it solution for on-site backups. Plug in an external hard drive (or configure a network storage drive), and your Mac's files are backed up.
+For macOS users, [Time Machine](https://support.apple.com/HT201250) is a no-frills, set-it-and-forget-it solution for on-site backups. Plug in an external hard drive (or configure a network storage drive), and your Mac's files are backed up.
 
 For the average consumer, Time Machine is an excellent choice, especially considering many Mac owners may _only_ have Time Machine as a backup strategy. For developers, however, Time Machine presents a problem: **how do I keep project dependencies from taking up space on my Time Machine drive?**
 
@@ -17,10 +17,10 @@ Asimov aims to solve that problem, scanning your filesystem for known dependency
 
 This fork provides two versions of Asimov:
 
-| Version | File | Shell | Performance | Dependencies |
-|---------|------|-------|-------------|--------------|
-| **Original** | `asimov` | Bash | Good | None (built-in tools) |
-| **Optimized** | `asimov-zsh` | ZSH | **2-3x faster** | `fd` (install via `brew install fd`) |
+| Version       | File         | Shell | Performance     | Dependencies                         |
+|---------------|--------------|-------|-----------------|--------------------------------------|
+| **Original**  | `asimov`     | Bash  | Good            | None (built-in tools)                |
+| **Optimized** | `asimov-zsh` | ZSH   | **2-3x faster** | `fd` (install via `brew install fd`) |
 
 ### Why an Optimized ZSH Version?
 
@@ -75,6 +75,7 @@ brew uninstall asimov
 ```
 
 The migration script will:
+
 - Backup your current Time Machine exclusions
 - Initialize the cache from existing exclusions
 - Create a symlink to `/usr/local/bin/asimov`
@@ -95,9 +96,9 @@ cd ~/asimov
 
 ### What the Install Script Does
 
-* Symlinks asimov to `/usr/local/bin/asimov`
-* Loads a launchd daemon to run asimov daily
-* Runs asimov for the first time
+- Symlinks asimov to `/usr/local/bin/asimov`
+- Loads a launchd daemon to run asimov daily
+- Runs asimov for the first time
 
 ## Usage
 
@@ -141,15 +142,15 @@ ASIMOV_OPT_SKIP_SIZE=true \
 asimov
 ```
 
-| Optimization | Environment Variable | Description |
-|--------------|---------------------|-------------|
-| Caching | `ASIMOV_OPT_CACHE=true` | Cache exclusion status to file |
-| Memory-mapped | `ASIMOV_OPT_MMAP=true` | Load cache into memory for O(1) lookups |
-| Incremental | `ASIMOV_OPT_INCREMENTAL=true` | Only scan recently modified directories |
-| Parallel | `ASIMOV_OPT_PARALLEL=true` | Run tmutil calls in parallel |
-| Gitignore | `ASIMOV_OPT_GITIGNORE=true` | Use fd's gitignore awareness |
-| Skip Size | `ASIMOV_OPT_SKIP_SIZE=true` | Skip directory size calculation |
-| Dust | `ASIMOV_OPT_DUST=true` | Use dust instead of du for size |
+| Optimization  | Environment Variable          | Description                             |
+|---------------|-------------------------------|-----------------------------------------|
+| Caching       | `ASIMOV_OPT_CACHE=true`       | Cache exclusion status to file          |
+| Memory-mapped | `ASIMOV_OPT_MMAP=true`        | Load cache into memory for O(1) lookups |
+| Incremental   | `ASIMOV_OPT_INCREMENTAL=true` | Only scan recently modified directories |
+| Parallel      | `ASIMOV_OPT_PARALLEL=true`    | Run tmutil calls in parallel            |
+| Gitignore     | `ASIMOV_OPT_GITIGNORE=true`   | Use fd's gitignore awareness            |
+| Skip Size     | `ASIMOV_OPT_SKIP_SIZE=true`   | Skip directory size calculation         |
+| Dust          | `ASIMOV_OPT_DUST=true`        | Use dust instead of du for size         |
 
 ## How it works
 
@@ -163,19 +164,19 @@ Don't worry about running it multiple times, either. Asimov is smart enough to s
 
 Asimov recognizes these dependency patterns:
 
-| Directory | Sentinel File | Language/Tool |
-|-----------|---------------|---------------|
-| `node_modules` | `package.json` | Node.js |
-| `vendor` | `composer.json` | PHP (Composer) |
-| `vendor` | `Gemfile` | Ruby (Bundler) |
-| `vendor` | `go.mod` | Go |
-| `.venv`, `venv` | `requirements.txt` | Python |
-| `target` | `Cargo.toml` | Rust |
-| `target` | `pom.xml` | Java (Maven) |
-| `.gradle`, `build` | `build.gradle` | Java (Gradle) |
-| `Pods` | `Podfile` | iOS (CocoaPods) |
-| `deps`, `.build` | `mix.exs` | Elixir |
-| And more... | | |
+| Directory          | Sentinel File      | Language/Tool   |
+|--------------------|--------------------|-----------------|
+| `node_modules`     | `package.json`     | Node.js         |
+| `vendor`           | `composer.json`    | PHP (Composer)  |
+| `vendor`           | `Gemfile`          | Ruby (Bundler)  |
+| `vendor`           | `go.mod`           | Go              |
+| `.venv`, `venv`    | `requirements.txt` | Python          |
+| `target`           | `Cargo.toml`       | Rust            |
+| `target`           | `pom.xml`          | Java (Maven)    |
+| `.gradle`, `build` | `build.gradle`     | Java (Gradle)   |
+| `Pods`             | `Podfile`          | iOS (CocoaPods) |
+| `deps`, `.build`   | `mix.exs`          | Elixir          |
+| And more...        |                    |                 |
 
 ### Retrieving Excluded Files
 

@@ -12,7 +12,7 @@
 # - ZSH native string manipulation instead of external cut/grep
 # - Uses zsh/stat module for faster file operations
 #
-# @version 0.5.0
+# @version 0.6.0
 # @author  Steve Grunwell (Original Author)
 # @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
@@ -50,6 +50,8 @@ zmodload zsh/zutil 2>/dev/null || true
 # ASIMOV_OPT_DUST: Use dust instead of du for size (default: false)
 # ASIMOV_OPT_SKIP_SIZE: Skip size calculation entirely (default: false)
 # ASIMOV_OPT_MMAP: Use in-memory hash for cache lookups (default: false)
+# ASIMOV_OPT_BATCH: Enable batch operations for tmutil and du (default: false)
+# ASIMOV_OPT_BATCH_SIZE: Number of paths to process in each batch (default: 50)
 # =============================================================================
 
 readonly ASIMOV_ROOT="${ASIMOV_ROOT:-$HOME}"
@@ -70,6 +72,8 @@ readonly ASIMOV_OPT_GITIGNORE="${ASIMOV_OPT_GITIGNORE:-false}"
 readonly ASIMOV_OPT_DUST="${ASIMOV_OPT_DUST:-false}"
 readonly ASIMOV_OPT_SKIP_SIZE="${ASIMOV_OPT_SKIP_SIZE:-false}"
 readonly ASIMOV_OPT_MMAP="${ASIMOV_OPT_MMAP:-false}"
+readonly ASIMOV_OPT_BATCH="${ASIMOV_OPT_BATCH:-false}"
+readonly ASIMOV_OPT_BATCH_SIZE="${ASIMOV_OPT_BATCH_SIZE:-50}"
 
 # Cache file location
 readonly ASIMOV_CACHE_FILE="${ASIMOV_CACHE_FILE:-${HOME}/.cache/asimov-exclusions}"
@@ -319,6 +323,125 @@ flush_mmap_cache() {
     fi
 }
 
+# =============================================================================
+# Batch Operations (OPT 7)
+# =============================================================================
+
+# Batch check exclusion status for multiple paths
+# Populates BATCH_EXCLUDED_MAP with path -> "excluded" or "included"
+typeset -A BATCH_EXCLUDED_MAP=()
+
+batch_check_exclusions() {
+    local -a paths=("$@")
+    
+    if (( ${#paths[@]} == 0 )); then
+        return
+    fi
+    
+    # Run tmutil isexcluded on all paths at once
+    local output
+    output=$(tmutil isexcluded "${paths[@]}" 2>/dev/null) || true
+    
+    # Parse output: each line is "[Excluded] path" or "[Included] path"
+    while IFS= read -r line; do
+        if [[ "$line" == "[Excluded]"* ]]; then
+            local path="${line#\[Excluded\]	}"
+            BATCH_EXCLUDED_MAP[$path]="excluded"
+        elif [[ "$line" == "[Included]"* ]]; then
+            local path="${line#\[Included\]	}"
+            BATCH_EXCLUDED_MAP[$path]="included"
+        fi
+    done <<< "$output"
+}
+
+# Batch calculate sizes for multiple paths
+# Populates BATCH_SIZE_MAP with path -> size string
+typeset -A BATCH_SIZE_MAP=()
+
+batch_get_sizes() {
+    local -a paths=("$@")
+    
+    if (( ${#paths[@]} == 0 )) || [[ "$ASIMOV_OPT_SKIP_SIZE" == "true" ]]; then
+        return
+    fi
+    
+    local output
+    if [[ "$ASIMOV_OPT_DUST" == "true" ]] && command -v dust &>/dev/null; then
+        # dust doesn't support multiple paths in a simple way, fall back to du
+        output=$(du -hs "${paths[@]}" 2>/dev/null) || true
+    else
+        output=$(du -hs "${paths[@]}" 2>/dev/null) || true
+    fi
+    
+    # Parse output: each line is "SIZE\tPATH"
+    while IFS=$'\t' read -r size path; do
+        if [[ -n "$path" ]]; then
+            BATCH_SIZE_MAP[$path]="$size"
+        fi
+    done <<< "$output"
+}
+
+# Process a batch of paths - check exclusions and sizes, then exclude
+process_batch() {
+    local -a paths=("$@")
+    
+    if (( ${#paths[@]} == 0 )); then
+        return
+    fi
+    
+    [[ "$ASIMOV_VERBOSE" == "true" ]] && print -- "Processing batch of ${#paths[@]} paths..."
+    
+    # Filter out cached paths first
+    local -a uncached_paths=()
+    for path in "${paths[@]}"; do
+        if ! is_cached_exclusion "$path"; then
+            uncached_paths+=("$path")
+        fi
+    done
+    
+    if (( ${#uncached_paths[@]} == 0 )); then
+        return
+    fi
+    
+    # Batch check exclusion status
+    batch_check_exclusions "${uncached_paths[@]}"
+    
+    # Find paths that need to be excluded
+    local -a to_exclude=()
+    for path in "${uncached_paths[@]}"; do
+        if [[ "${BATCH_EXCLUDED_MAP[$path]:-}" == "excluded" ]]; then
+            [[ "$ASIMOV_VERBOSE" == "true" ]] && print -- "- $path is already excluded, skipping."
+            add_to_cache "$path"
+        else
+            to_exclude+=("$path")
+        fi
+    done
+    
+    if (( ${#to_exclude[@]} == 0 )); then
+        return
+    fi
+    
+    # Batch get sizes for paths to exclude
+    batch_get_sizes "${to_exclude[@]}"
+    
+    # Exclude each path
+    for path in "${to_exclude[@]}"; do
+        local size="${BATCH_SIZE_MAP[$path]:-N/A}"
+        
+        if [[ "$ASIMOV_DRY_RUN" == "true" ]]; then
+            print -- "[DRY-RUN] Would exclude: $path ($size)"
+        else
+            tmutil addexclusion "$path"
+            print -- "- $path has been excluded from Time Machine backups ($size)."
+            add_to_cache "$path"
+        fi
+    done
+    
+    # Clear batch maps for next batch
+    BATCH_EXCLUDED_MAP=()
+    BATCH_SIZE_MAP=()
+}
+
 # OPT 6: Get directory size using configured method
 get_dir_size() {
     local dir_path="$1"
@@ -429,6 +552,7 @@ print_config() {
         [[ "$ASIMOV_OPT_MMAP" == "true" ]] && print "  - Memory-mapped cache (OPT 5): ${#MMAP_CACHE[@]} entries loaded"
         [[ "$ASIMOV_OPT_DUST" == "true" ]] && print "  - Using dust for size (OPT 6)"
         [[ "$ASIMOV_OPT_SKIP_SIZE" == "true" ]] && print "  - Skip size calculation (OPT 6)"
+        [[ "$ASIMOV_OPT_BATCH" == "true" ]] && print "  - Batch operations (OPT 7): batch size ${ASIMOV_OPT_BATCH_SIZE}"
     fi
 }
 
@@ -457,15 +581,44 @@ fi
 # Add exclusion patterns
 fd_args+=("${FD_EXCLUDE_ARGS[@]}")
 
-# Use fd for fast parallel search
-fd "${fd_args[@]}" "$fd_pattern" "$ASIMOV_ROOT" 2>/dev/null | while IFS= read -r found_path; do
-    if has_sentinel "$found_path"; then
-        exclude_path_parallel "$found_path"
+# OPT 7: Batch mode - collect paths and process in batches
+if [[ "$ASIMOV_OPT_BATCH" == "true" ]]; then
+    typeset -a batch_paths=()
+    typeset -a all_valid_paths=()
+    
+    # First collect all valid paths (fd output piped to while runs in subshell, so collect first)
+    while IFS= read -r found_path; do
+        if has_sentinel "$found_path"; then
+            all_valid_paths+=("$found_path")
+        fi
+    done < <(fd "${fd_args[@]}" "$fd_pattern" "$ASIMOV_ROOT" 2>/dev/null)
+    
+    # Process paths in batches
+    for path in "${all_valid_paths[@]}"; do
+        batch_paths+=("$path")
+        
+        # Process batch when it reaches the configured size
+        if (( ${#batch_paths[@]} >= ASIMOV_OPT_BATCH_SIZE )); then
+            process_batch "${batch_paths[@]}"
+            batch_paths=()
+        fi
+    done
+    
+    # Process remaining paths in the final batch
+    if (( ${#batch_paths[@]} > 0 )); then
+        process_batch "${batch_paths[@]}"
     fi
-done
-
-# OPT 3: Wait for all parallel jobs to complete
-wait_for_parallel_jobs
+else
+    # Non-batch mode: process paths individually (original behavior)
+    fd "${fd_args[@]}" "$fd_pattern" "$ASIMOV_ROOT" 2>/dev/null | while IFS= read -r found_path; do
+        if has_sentinel "$found_path"; then
+            exclude_path_parallel "$found_path"
+        fi
+    done
+    
+    # OPT 3: Wait for all parallel jobs to complete
+    wait_for_parallel_jobs
+fi
 
 # OPT 5: Flush in-memory cache to disk
 flush_mmap_cache

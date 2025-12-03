@@ -4,23 +4,20 @@ This document outlines strategies and optimizations to improve the performance o
 
 ## Implementation Status Overview
 
-| #  | Improvement                                    | Status     | Notes                                                                        |
-|----|------------------------------------------------|------------|------------------------------------------------------------------------------|
-| 1  | Use `fd` instead of `find`                     | ✅ Done     | Parallel directory traversal with fd                                         |
-| 2  | Use ZSH Builtins                               | ✅ Done     | Native string operations, pattern matching                                   |
-| 3  | Load ZSH Modules                               | ✅ Done     | zsh/stat, zsh/datetime, zsh/parameter, zsh/zutil                             |
-| 4  | Precompute Directory/Sentinel Mappings         | ✅ Done     | `SENTINEL_MAP` associative array                                             |
-| 5  | Batch Operations                               | ⚠️ Partial | Parallel tmutil via `ASIMOV_OPT_PARALLEL`, but not batch `tmutil isexcluded` |
-| 6  | Caching Exclusion Status                       | ✅ Done     | `ASIMOV_OPT_CACHE` with file-based cache                                     |
-| 7  | Incremental Scanning                           | ✅ Done     | `ASIMOV_OPT_INCREMENTAL` with `--changed-within`                             |
-| 8  | Parallel tmutil Calls                          | ✅ Done     | `ASIMOV_OPT_PARALLEL` with job pool management                               |
-| 9  | Use `.gitignore` Awareness                     | ✅ Done     | `ASIMOV_OPT_GITIGNORE` flag                                                  |
-| 10 | Memory-Mapped File Operations (In-Memory Hash) | ✅ Done     | `ASIMOV_OPT_MMAP` with `MMAP_CACHE`                                          |
-| 11 | Alternative to `du` (dust)                     | ✅ Done     | `ASIMOV_OPT_DUST` flag                                                       |
-| 12 | SQLite Cache                                   | ❌ Open     | Not implemented (recommended for 100,000+ exclusions)                        |
-| 13 | Batch `du` for multiple paths                  | ❌ Open     | Currently per-path, not batched                                              |
-
----
+| #  | Improvement                                    | Status  | Notes                                                         |
+|----|------------------------------------------------|---------|---------------------------------------------------------------|
+| 1  | Use `fd` instead of `find`                     | ✅ Done | Parallel directory traversal with fd                          |
+| 2  | Use ZSH Builtins                               | ✅ Done | Native string operations, pattern matching                    |
+| 3  | Load ZSH Modules                               | ✅ Done | zsh/stat, zsh/datetime, zsh/parameter, zsh/zutil              |
+| 4  | Precompute Directory/Sentinel Mappings         | ✅ Done | `SENTINEL_MAP` associative array                              |
+| 5  | Batch Operations                               | ✅ Done | `ASIMOV_OPT_BATCH` for batch tmutil and du                    |
+| 6  | Caching Exclusion Status                       | ✅ Done | `ASIMOV_OPT_CACHE` with file-based cache                      |
+| 7  | Incremental Scanning                           | ✅ Done | `ASIMOV_OPT_INCREMENTAL` with `--changed-within`              |
+| 8  | Parallel tmutil Calls                          | ✅ Done | `ASIMOV_OPT_PARALLEL` with job pool management                |
+| 9  | Use `.gitignore` Awareness                     | ✅ Done | `ASIMOV_OPT_GITIGNORE` flag                                   |
+| 10 | Memory-Mapped File Operations (In-Memory Hash) | ✅ Done | `ASIMOV_OPT_MMAP` with `MMAP_CACHE`                           |
+| 11 | Alternative to `du` (dust)                     | ✅ Done | `ASIMOV_OPT_DUST` flag                                        |
+| 12 | SQLite Cache                                   | ❌ Open | Not implemented (recommended for 100,000+ exclusions)         |
 
 ## Open
 
@@ -43,29 +40,29 @@ Benefits:
 - **ACID transactions** - Safe concurrent access
 - **Compression** - SQLite compresses data automatically
 
-### Batch `tmutil isexcluded` Calls
-
-Currently each path is checked individually. Batch checking could reduce overhead:
-
-```zsh
-# Batch exclusion check
-tmutil isexcluded "${paths[@]}" | while read ...
-```
-
-### Batch `du` for Size Calculation
-
-Currently each directory size is calculated individually:
-
-```zsh
-# Parallel size calculation (if needed)
-du -hs "${paths[@]}" 2>/dev/null
-```
-
----
-
 ## Done
 
 The following improvements have been implemented in `asimov-zsh`:
+
+### Batch Operations
+
+Batch `tmutil isexcluded` and `du` calls to reduce process spawning overhead.
+
+**Implementation**: `ASIMOV_OPT_BATCH=true` enables batch mode with `ASIMOV_OPT_BATCH_SIZE=50` (default).
+
+```zsh
+# Batch exclusion check - check multiple paths in one tmutil call
+tmutil isexcluded "${paths[@]}" | while read ...
+
+# Batch size calculation - get sizes for multiple paths at once
+du -hs "${paths[@]}" 2>/dev/null
+```
+
+Benefits:
+
+- **Reduced process spawning** - One tmutil/du call per batch instead of per path
+- **Better I/O patterns** - Batched syscalls are more efficient
+- **Configurable batch size** - Tune `ASIMOV_OPT_BATCH_SIZE` for your system
 
 ### Use `fd` Instead of `find`
 
@@ -242,8 +239,6 @@ flush_cache() {
 Replace `du` with `dust` which is faster and written in Rust.
 
 **Implementation**: `ASIMOV_OPT_DUST=true` uses dust for size calculation. Additionally, `ASIMOV_OPT_SKIP_SIZE=true` skips size calculation entirely for maximum speed.
-
----
 
 ## Reference Documentation
 
