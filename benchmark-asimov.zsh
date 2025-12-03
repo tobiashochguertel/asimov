@@ -95,6 +95,7 @@ while [[ $# -gt 0 ]]; do
         print "  ASIMOV_OPT_MMAP        Use in-memory hash cache (OPT 5)"
         print "  ASIMOV_OPT_DUST        Use dust instead of du (OPT 6)"
         print "  ASIMOV_OPT_SKIP_SIZE   Skip size calculation (OPT 6)"
+        print "  ASIMOV_OPT_BATCH       Enable batch operations (OPT 7)"
         exit 0
         ;;
     *)
@@ -372,6 +373,13 @@ EOF
 ASIMOV_ROOT='$test_root' ASIMOV_DRY_RUN=true ASIMOV_VERBOSE=false ASIMOV_OPT_SKIP_SIZE=true ${SCRIPT_DIR}/asimov-zsh 2>/dev/null | wc -l
 EOF
 
+    # OPT 7: Batch operations
+    local opt7_wrapper=$(mktemp)
+    cat >"$opt7_wrapper" <<EOF
+#!/usr/bin/env zsh
+ASIMOV_ROOT='$test_root' ASIMOV_DRY_RUN=true ASIMOV_VERBOSE=false ASIMOV_OPT_BATCH=true ${SCRIPT_DIR}/asimov-zsh 2>/dev/null | wc -l
+EOF
+
     # All optimizations combined
     cat >"$all_wrapper" <<EOF
 #!/usr/bin/env zsh
@@ -383,10 +391,11 @@ ASIMOV_ROOT='$test_root' ASIMOV_DRY_RUN=true ASIMOV_VERBOSE=false \
     ASIMOV_OPT_PARALLEL=true \
     ASIMOV_OPT_GITIGNORE=true \
     ASIMOV_OPT_SKIP_SIZE=true \
+    ASIMOV_OPT_BATCH=true \
     ${SCRIPT_DIR}/asimov-zsh 2>/dev/null | wc -l
 EOF
 
-    chmod +x "$base_wrapper" "$opt1_wrapper" "$opt2_wrapper" "$opt3_wrapper" "$opt4_wrapper" "$opt5_wrapper" "$opt6_wrapper" "$all_wrapper"
+    chmod +x "$base_wrapper" "$opt1_wrapper" "$opt2_wrapper" "$opt3_wrapper" "$opt4_wrapper" "$opt5_wrapper" "$opt6_wrapper" "$opt7_wrapper" "$all_wrapper"
 
     # Run hyperfine benchmark
     hyperfine \
@@ -401,10 +410,11 @@ EOF
         --command-name "OPT4: Gitignore" "$opt4_wrapper" \
         --command-name "OPT5: Mmap Cache" "$opt5_wrapper" \
         --command-name "OPT6: Skip Size" "$opt6_wrapper" \
+        --command-name "OPT7: Batch" "$opt7_wrapper" \
         --command-name "All Optimizations" "$all_wrapper"
 
     # Clean up
-    rm -f "$base_wrapper" "$opt1_wrapper" "$opt2_wrapper" "$opt3_wrapper" "$opt4_wrapper" "$opt5_wrapper" "$opt6_wrapper" "$all_wrapper"
+    rm -f "$base_wrapper" "$opt1_wrapper" "$opt2_wrapper" "$opt3_wrapper" "$opt4_wrapper" "$opt5_wrapper" "$opt6_wrapper" "$opt7_wrapper" "$all_wrapper"
 
     # Print results
     print "\n\033[0;32mOptimization benchmark complete!\033[0m"

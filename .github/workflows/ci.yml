@@ -90,8 +90,39 @@ jobs:
           ASIMOV_OPT_CACHE=true \
           ASIMOV_OPT_MMAP=true \
           ASIMOV_OPT_SKIP_SIZE=true \
+          ASIMOV_OPT_BATCH=true \
           ./asimov-zsh
           echo "All optimizations test completed"
+
+      - name: Test status command
+        run: |
+          ASIMOV_STATUS=true ./asimov-zsh
+          echo "Status command test completed"
+
+      - name: Test logging (text format)
+        run: |
+          ASIMOV_DRY_RUN=true \
+          ASIMOV_ROOT=/tmp \
+          ASIMOV_LOG_FILE=/tmp/asimov-test.log \
+          ASIMOV_LOG_FORMAT=text \
+          ./asimov-zsh
+          cat /tmp/asimov-test.log
+          echo "Text logging test completed"
+
+      - name: Test logging (JSON format)
+        run: |
+          ASIMOV_DRY_RUN=true \
+          ASIMOV_ROOT=/tmp \
+          ASIMOV_LOG_FILE=/tmp/asimov-test.json \
+          ASIMOV_LOG_FORMAT=json \
+          ./asimov-zsh
+          cat /tmp/asimov-test.json
+          echo "JSON logging test completed"
+
+      - name: Test NO_COLOR support
+        run: |
+          NO_COLOR=1 ASIMOV_DRY_RUN=true ASIMOV_ROOT=/tmp ./asimov-zsh
+          echo "NO_COLOR test completed"
 
   # Integration test - create test projects and verify exclusion
   integration-test:

@@ -151,6 +151,40 @@ asimov
 | Gitignore     | `ASIMOV_OPT_GITIGNORE=true`   | Use fd's gitignore awareness            |
 | Skip Size     | `ASIMOV_OPT_SKIP_SIZE=true`   | Skip directory size calculation         |
 | Dust          | `ASIMOV_OPT_DUST=true`        | Use dust instead of du for size         |
+| Batch         | `ASIMOV_OPT_BATCH=true`       | Batch tmutil and du operations          |
+
+### Service Status
+
+Check the status of the asimov launchd service:
+
+```sh
+# Show service status, statistics, and recent exclusions
+ASIMOV_STATUS=true asimov
+```
+
+### Logging
+
+Enable logging for debugging or monitoring:
+
+```sh
+# Log to file (text format)
+ASIMOV_LOG_FILE=~/.local/log/asimov.log asimov
+
+# Log in JSON format
+ASIMOV_LOG_FILE=~/.local/log/asimov.json ASIMOV_LOG_FORMAT=json asimov
+```
+
+### Color Output
+
+Asimov supports the [NO_COLOR](https://no-color.org/) standard:
+
+```sh
+# Disable colors
+NO_COLOR=1 asimov
+
+# Colors are also disabled automatically when output is piped
+asimov | cat
+```
 
 ## How it works
 

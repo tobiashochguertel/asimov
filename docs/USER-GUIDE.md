@@ -303,11 +303,25 @@ Note: These stale entries don't cause problems—they're just references in Spot
 | `ASIMOV_ROOT` | `$HOME` | Directory to scan |
 | `ASIMOV_DRY_RUN` | `false` | Don't actually exclude, just show |
 | `ASIMOV_VERBOSE` | `false` | Show detailed progress |
+| `ASIMOV_LIST_EXCLUSIONS` | `false` | List current exclusions instead of scanning |
+| `ASIMOV_INIT_CACHE` | `false` | Initialize cache from current exclusions |
+| `ASIMOV_STATUS` | `false` | Show service status and statistics |
 | `ASIMOV_OPT_CACHE` | `false` | Enable caching |
 | `ASIMOV_OPT_MMAP` | `false` | Use in-memory cache |
 | `ASIMOV_OPT_SKIP_SIZE` | `false` | Don't calculate directory sizes |
 | `ASIMOV_OPT_INCREMENTAL` | `false` | Only scan recently modified dirs |
 | `ASIMOV_OPT_INCREMENTAL_DAYS` | `7` | Days threshold for incremental |
+| `ASIMOV_OPT_BATCH` | `false` | Batch tmutil and du operations |
+| `ASIMOV_OPT_BATCH_SIZE` | `50` | Number of paths per batch |
+| `ASIMOV_OPT_PARALLEL` | `false` | Run tmutil calls in parallel |
+| `ASIMOV_OPT_PARALLEL_JOBS` | `4` | Max parallel jobs |
+| `ASIMOV_OPT_GITIGNORE` | `false` | Use fd's gitignore awareness |
+| `ASIMOV_OPT_DUST` | `false` | Use dust instead of du for size |
+| `ASIMOV_LOG_FILE` | (empty) | Path to log file (empty = disabled) |
+| `ASIMOV_LOG_FORMAT` | `text` | Log format: `text` or `json` |
+| `ASIMOV_STATUS_TRUNCATE` | `true` | Truncate long paths in status output |
+| `ASIMOV_STATUS_TRUNCATE_LEN` | `55` | Max path length before truncation |
+| `NO_COLOR` | (unset) | Disable colors when set (any value) |
 
 ### Customize the Daemon
 
@@ -444,8 +458,17 @@ ASIMOV_LIST_EXCLUSIONS=true asimov
 # Initialize cache
 ASIMOV_INIT_CACHE=true asimov
 
+# Show service status and statistics
+ASIMOV_STATUS=true asimov
+
 # Scan specific directory
 ASIMOV_ROOT=~/projects asimov
+
+# Enable logging
+ASIMOV_LOG_FILE=~/.local/log/asimov.log asimov
+
+# Disable colors
+NO_COLOR=1 asimov
 
 # Check if daemon is running
 launchctl list | grep asimov

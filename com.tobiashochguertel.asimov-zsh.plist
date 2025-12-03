@@ -17,9 +17,17 @@
             <!-- Use in-memory hash for O(1) lookups -->
             <key>ASIMOV_OPT_MMAP</key>
             <string>true</string>
+            <!-- Enable batch operations for better performance -->
+            <key>ASIMOV_OPT_BATCH</key>
+            <string>true</string>
             <!-- Skip size calculation for speed -->
             <key>ASIMOV_OPT_SKIP_SIZE</key>
             <string>true</string>
+            <!-- Optional: Enable logging (uncomment to enable) -->
+            <!-- <key>ASIMOV_LOG_FILE</key> -->
+            <!-- <string>/Users/YOUR_USERNAME/.local/log/asimov.log</string> -->
+            <!-- <key>ASIMOV_LOG_FORMAT</key> -->
+            <!-- <string>text</string> -->
         </dict>
     </dict>
 </plist>
