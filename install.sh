@@ -153,9 +153,9 @@ upgrade() {
     chmod +x "${INSTALL_BIN}/asimov"
     echo -e "${GREEN}✓ Binary updated${NC}"
     
-    # Update plist (daemon configuration)
+    # Update plist (daemon configuration) - expand ~ to actual home path
     echo -e "${CYAN}Updating daemon configuration...${NC}"
-    cp -f "${DIR}/${PLIST_ZSH}" "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}"
+    sed "s|~/|${HOME}/|g" "${DIR}/${PLIST_ZSH}" > "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}"
     echo -e "${GREEN}✓ Daemon configuration updated${NC}"
     
     # Create log directory if logging is enabled in plist
@@ -249,9 +249,9 @@ if $USE_ZSH; then
         launchctl unload "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}" 2>/dev/null || true
     fi
 
-    # Copy plist to LaunchAgents (production location)
+    # Copy plist to LaunchAgents and expand ~ to actual home path
     echo -e "${CYAN}Installing daemon to ${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}...${NC}"
-    cp -f "${DIR}/${PLIST_ZSH}" "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}"
+    sed "s|~/|${HOME}/|g" "${DIR}/${PLIST_ZSH}" > "${LAUNCH_AGENTS_DIR}/${PLIST_ZSH}"
     echo -e "${GREEN}✓ Daemon plist installed${NC}"
     
     # Create log directory

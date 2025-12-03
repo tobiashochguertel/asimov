@@ -12,8 +12,8 @@
         <key>EnvironmentVariables</key>
         <dict>
             <!-- 
-                Note: ~ is expanded to $HOME by asimov-zsh script.
-                launchd does NOT expand ~ or $HOME in environment variables.
+                Note: ~ is replaced with $HOME by install.sh during installation.
+                The installed plist will have absolute paths.
             -->
             
             <!-- Enable caching for faster subsequent runs -->

@@ -242,7 +242,7 @@ ASIMOV_LOG_FILE=~/.local/log/asimov.log asimov
 ASIMOV_LOG_FILE=~/.local/log/asimov.json ASIMOV_LOG_FORMAT=json asimov
 ```
 
-> **Note:** The script automatically expands `~` to `$HOME` in all path-related environment variables. This is necessary because launchd does not expand `~` or `$HOME` in plist environment variables.
+> **Note:** The install script automatically expands `~` to your home directory when installing the plist. The script also handles `~` expansion as a fallback for manual command-line usage.
 
 ### Color Output
 
