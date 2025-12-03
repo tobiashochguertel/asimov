@@ -31,6 +31,7 @@ The following improvements are not yet implemented in `asimov-zsh`:
 Refactor the script's configuration approach from individual environment variables to a centralized associative array (hash-map) with sensible defaults. This improves maintainability and makes configuration more consistent.
 
 **Current approach:**
+
 ```zsh
 readonly ASIMOV_ROOT="${ASIMOV_ROOT:-$HOME}"
 readonly ASIMOV_DRY_RUN="${ASIMOV_DRY_RUN:-false}"
@@ -39,6 +40,7 @@ readonly ASIMOV_OPT_CACHE="${ASIMOV_OPT_CACHE:-false}"
 ```
 
 **Proposed approach:**
+
 ```zsh
 # Declare configuration with defaults
 typeset -A ASIMOV_CONFIG=(
@@ -73,6 +75,7 @@ Benefits:
 - **Better documentation** - Config structure is self-documenting
 
 **Files requiring updates:**
+
 - `asimov-zsh` - Main script refactoring
 - `benchmark-asimov.zsh` - Update environment variable handling
 - `com.tobiashochguertel.asimov-zsh.plist` - Update EnvironmentVariables section
@@ -117,6 +120,7 @@ asimov --status
 ```
 
 **Features:**
+
 - Show launchd service status (running/stopped/error)
 - Display last execution time and next scheduled run
 - Show total exclusions and cache statistics
@@ -124,6 +128,7 @@ asimov --status
 - Display scan duration and performance metrics
 
 **Implementation approach:**
+
 - Store run metadata in `~/.cache/asimov-status.json`
 - Query launchd for service status: `launchctl list | grep asimov`
 - Read plist for schedule information
@@ -134,6 +139,7 @@ asimov --status
 Add comprehensive logging support for debugging and monitoring, especially useful when running as a launchd service.
 
 **Configuration:**
+
 ```zsh
 # Enable logging
 ASIMOV_LOG_FILE=~/.local/log/asimov.log
@@ -145,7 +151,8 @@ ASIMOV_LOG_KEEP=5
 ```
 
 **Text log format:**
-```
+
+```log
 [2025-12-03T14:15:23+0100] [INFO] Starting asimov-zsh scan
 [2025-12-03T14:15:23+0100] [INFO] Root: /Users/tobias
 [2025-12-03T14:15:23+0100] [INFO] Optimizations: cache, mmap, batch
@@ -155,19 +162,22 @@ ASIMOV_LOG_KEEP=5
 ```
 
 **JSON log format:**
-```json
+
+```jsonl
 {"timestamp":"2025-12-03T14:15:23+0100","level":"INFO","event":"scan_start","root":"/Users/tobias"}
 {"timestamp":"2025-12-03T14:15:24+0100","level":"EXCL","event":"excluded","path":"/Users/tobias/work/project/node_modules","size":"45M"}
 {"timestamp":"2025-12-03T14:16:08+0100","level":"INFO","event":"scan_complete","dirs_scanned":1234,"excluded":56,"duration_sec":45.2}
 ```
 
 **Benefits:**
+
 - **Debugging** - Trace issues when running as daemon
 - **Monitoring** - Parse JSON logs with tools like `jq`
 - **Alerting** - Integrate with monitoring systems
 - **Audit trail** - Track what was excluded and when
 
 **Implementation approach:**
+
 ```zsh
 # Logging functions
 log_init() {
@@ -180,7 +190,7 @@ log_init() {
 log_msg() {
     local level="$1" message="$2"
     local timestamp=$(date -Iseconds)
-    
+
     if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
         printf '{"timestamp":"%s","level":"%s","message":"%s"}\n' \
             "$timestamp" "$level" "$message" >> "${ASIMOV_CONFIG[log_file]}"
@@ -192,6 +202,7 @@ log_msg() {
 ```
 
 **launchd plist update:**
+
 ```xml
 <key>EnvironmentVariables</key>
 <dict>
