@@ -19,95 +19,12 @@ This document outlines strategies and optimizations to improve the performance o
 | 11 | Alternative to `du` (dust)                     | ✅ Done | `ASIMOV_OPT_DUST` flag                                        |
 | 12 | Configuration Refactoring                      | ✅ Done | `ASIMOV_CONFIG` associative array with sensible defaults      |
 | 13 | Service Status & Monitoring                    | ✅ Done | `ASIMOV_STATUS=true` for launchd service info                 |
-| 14 | Logging System                                 | ❌ Open | Text and JSON logging with `ASIMOV_LOG_FILE`                  |
+| 14 | Logging System                                 | ✅ Done | Text and JSON logging with `ASIMOV_LOG_FILE`                  |
 | 15 | SQLite Cache                                   | ❌ Open | Not implemented (recommended for 100,000+ exclusions)         |
 
 ## Open
 
 The following improvements are not yet implemented in `asimov-zsh`:
-
-### Logging System
-
-Add comprehensive logging support for debugging and monitoring, especially useful when running as a launchd service.
-
-**Configuration:**
-
-```zsh
-# Enable logging
-ASIMOV_LOG_FILE=~/.local/log/asimov.log
-ASIMOV_LOG_FORMAT=text  # or "json"
-
-# Log rotation (optional)
-ASIMOV_LOG_MAX_SIZE=10M
-ASIMOV_LOG_KEEP=5
-```
-
-**Text log format:**
-
-```log
-[2025-12-03T14:15:23+0100] [INFO] Starting asimov-zsh scan
-[2025-12-03T14:15:23+0100] [INFO] Root: /Users/tobias
-[2025-12-03T14:15:23+0100] [INFO] Optimizations: cache, mmap, batch
-[2025-12-03T14:15:24+0100] [EXCL] /Users/tobias/work/project/node_modules (45M)
-[2025-12-03T14:15:25+0100] [SKIP] /Users/tobias/work/old/node_modules (cached)
-[2025-12-03T14:16:08+0100] [INFO] Scan complete: 1234 dirs, 56 excluded, 45.2s
-```
-
-**JSON log format:**
-
-```jsonl
-{"timestamp":"2025-12-03T14:15:23+0100","level":"INFO","event":"scan_start","root":"/Users/tobias"}
-{"timestamp":"2025-12-03T14:15:24+0100","level":"EXCL","event":"excluded","path":"/Users/tobias/work/project/node_modules","size":"45M"}
-{"timestamp":"2025-12-03T14:16:08+0100","level":"INFO","event":"scan_complete","dirs_scanned":1234,"excluded":56,"duration_sec":45.2}
-```
-
-**Benefits:**
-
-- **Debugging** - Trace issues when running as daemon
-- **Monitoring** - Parse JSON logs with tools like `jq`
-- **Alerting** - Integrate with monitoring systems
-- **Audit trail** - Track what was excluded and when
-
-**Implementation approach:**
-
-```zsh
-# Logging functions
-log_init() {
-    if [[ -n "${ASIMOV_CONFIG[log_file]}" ]]; then
-        mkdir -p "${ASIMOV_CONFIG[log_file]:h}"
-        touch "${ASIMOV_CONFIG[log_file]}"
-    fi
-}
-
-log_msg() {
-    local level="$1" message="$2"
-    local timestamp=$(date -Iseconds)
-
-    if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
-        printf '{"timestamp":"%s","level":"%s","message":"%s"}\n' \
-            "$timestamp" "$level" "$message" >> "${ASIMOV_CONFIG[log_file]}"
-    else
-        printf '[%s] [%s] %s\n' "$timestamp" "$level" "$message" \
-            >> "${ASIMOV_CONFIG[log_file]}"
-    fi
-}
-```
-
-**launchd plist update:**
-
-```xml
-<key>EnvironmentVariables</key>
-<dict>
-    <key>ASIMOV_LOG_FILE</key>
-    <string>/Users/USER/.local/log/asimov.log</string>
-    <key>ASIMOV_LOG_FORMAT</key>
-    <string>text</string>
-</dict>
-<key>StandardOutPath</key>
-<string>/Users/USER/.local/log/asimov-stdout.log</string>
-<key>StandardErrorPath</key>
-<string>/Users/USER/.local/log/asimov-stderr.log</string>
-```
 
 ### SQLite Cache
 
@@ -164,6 +81,40 @@ Features:
 - **Last run time** - Stored in `~/.cache/asimov-status.json`
 - **Statistics** - Total exclusions, cache entries, scan duration
 - **Recent exclusions** - Last 5 entries from cache file
+
+### Logging System
+
+Added comprehensive logging support for debugging and monitoring, especially useful when running as a launchd service.
+
+**Configuration:**
+```zsh
+ASIMOV_LOG_FILE=~/.local/log/asimov.log
+ASIMOV_LOG_FORMAT=text  # or "json"
+```
+
+**Text log format:**
+```log
+[2025-12-03T14:15:23+0100] [INFO] Starting asimov-zsh scan (root: /Users/tobias, opts: cache,mmap)
+[2025-12-03T14:15:24+0100] [EXCL] /Users/tobias/work/project/node_modules (45M)
+[2025-12-03T14:15:25+0100] [SKIP] /Users/tobias/work/old/node_modules (cached)
+[2025-12-03T14:16:08+0100] [INFO] Scan complete: 1234 dirs scanned, 56 excluded, 45s duration
+```
+
+**JSON log format:**
+```json
+{"timestamp":"2025-12-03T14:15:23+0100","level":"INFO","event":"scan_start","message":"Starting asimov-zsh scan","root":"/Users/tobias","optimizations":"cache,mmap"}
+{"timestamp":"2025-12-03T14:15:24+0100","level":"EXCL","event":"excluded","message":"Excluded: /Users/tobias/work/project/node_modules","path":"/Users/tobias/work/project/node_modules","size":"45M"}
+{"timestamp":"2025-12-03T14:16:08+0100","level":"INFO","event":"scan_complete","message":"Scan complete","dirs_scanned":1234,"dirs_excluded":56,"duration_sec":45}
+```
+
+Features:
+
+- **log_info()** - General information messages
+- **log_excl()** - Excluded path with size
+- **log_skip()** - Skipped path with reason (cached, already_excluded)
+- **log_error()** - Error messages (also prints to stderr)
+- **log_scan_start()** - Scan start with configuration
+- **log_scan_complete()** - Scan completion with statistics
 
 ### Configuration Refactoring to Associative Array
 

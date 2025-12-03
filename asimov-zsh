@@ -12,7 +12,7 @@
 # - ZSH native string manipulation instead of external cut/grep
 # - Uses zsh/stat module for faster file operations
 #
-# @version 0.8.0
+# @version 0.9.0
 # @author  Steve Grunwell (Original Author)
 # @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
@@ -76,7 +76,112 @@ typeset -A ASIMOV_CONFIG=(
     [opt_batch]="${ASIMOV_OPT_BATCH:-false}"
     [opt_batch_size]="${ASIMOV_OPT_BATCH_SIZE:-50}"
     [status_file]="${ASIMOV_STATUS_FILE:-${HOME}/.cache/asimov-status.json}"
+    [log_file]="${ASIMOV_LOG_FILE:-}"
+    [log_format]="${ASIMOV_LOG_FORMAT:-text}"
 )
+
+# =============================================================================
+# Logging System
+# =============================================================================
+# Supports text and JSON log formats. Set ASIMOV_LOG_FILE to enable logging.
+# Log format: text (default) or json
+#
+# Text format: [TIMESTAMP] [LEVEL] MESSAGE
+# JSON format: {"timestamp":"...","level":"...","event":"...","message":"..."}
+# =============================================================================
+
+log_init() {
+    if [[ -n "${ASIMOV_CONFIG[log_file]}" ]]; then
+        mkdir -p "${ASIMOV_CONFIG[log_file]:h}" 2>/dev/null || true
+        touch "${ASIMOV_CONFIG[log_file]}" 2>/dev/null || true
+    fi
+}
+
+# Core logging function
+log_msg() {
+    local level="$1"
+    local message="$2"
+    local event="${3:-}"
+    local extra="${4:-}"
+    
+    # Skip if no log file configured
+    [[ -z "${ASIMOV_CONFIG[log_file]}" ]] && return
+    
+    local timestamp=$(date -Iseconds)
+    
+    if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
+        # JSON format
+        local json="{\"timestamp\":\"$timestamp\",\"level\":\"$level\""
+        [[ -n "$event" ]] && json+=",\"event\":\"$event\""
+        json+=",\"message\":\"$message\""
+        [[ -n "$extra" ]] && json+=",$extra"
+        json+="}"
+        print -- "$json" >> "${ASIMOV_CONFIG[log_file]}"
+    else
+        # Text format
+        print -- "[$timestamp] [$level] $message" >> "${ASIMOV_CONFIG[log_file]}"
+    fi
+}
+
+# Convenience functions for different log levels
+log_info() {
+    log_msg "INFO" "$1" "${2:-}" "${3:-}"
+    [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "[INFO] $1"
+}
+
+log_excl() {
+    local path="$1"
+    local size="${2:-}"
+    if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
+        log_msg "EXCL" "Excluded: $path" "excluded" "\"path\":\"$path\",\"size\":\"$size\""
+    else
+        log_msg "EXCL" "$path ($size)"
+    fi
+}
+
+log_skip() {
+    local path="$1"
+    local reason="${2:-cached}"
+    if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
+        log_msg "SKIP" "Skipped: $path" "skipped" "\"path\":\"$path\",\"reason\":\"$reason\""
+    else
+        log_msg "SKIP" "$path ($reason)"
+    fi
+}
+
+log_error() {
+    log_msg "ERROR" "$1" "error" "${2:-}"
+    print -- "\033[0;31m[ERROR] $1\033[0m" >&2
+}
+
+log_scan_start() {
+    local root="${ASIMOV_CONFIG[root]}"
+    local opts=""
+    [[ "${ASIMOV_CONFIG[opt_cache]}" == "true" ]] && opts+="cache,"
+    [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]] && opts+="mmap,"
+    [[ "${ASIMOV_CONFIG[opt_batch]}" == "true" ]] && opts+="batch,"
+    [[ "${ASIMOV_CONFIG[opt_parallel]}" == "true" ]] && opts+="parallel,"
+    [[ "${ASIMOV_CONFIG[opt_incremental]}" == "true" ]] && opts+="incremental,"
+    opts="${opts%,}"  # Remove trailing comma
+    
+    if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
+        log_msg "INFO" "Starting asimov-zsh scan" "scan_start" "\"root\":\"$root\",\"optimizations\":\"$opts\""
+    else
+        log_msg "INFO" "Starting asimov-zsh scan (root: $root, opts: $opts)"
+    fi
+}
+
+log_scan_complete() {
+    local dirs_scanned="$1"
+    local dirs_excluded="$2"
+    local duration="$3"
+    
+    if [[ "${ASIMOV_CONFIG[log_format]}" == "json" ]]; then
+        log_msg "INFO" "Scan complete" "scan_complete" "\"dirs_scanned\":$dirs_scanned,\"dirs_excluded\":$dirs_excluded,\"duration_sec\":$duration"
+    else
+        log_msg "INFO" "Scan complete: $dirs_scanned dirs scanned, $dirs_excluded excluded, ${duration}s duration"
+    fi
+}
 
 # =============================================================================
 # List Exclusions Mode - Uses mdfind for comprehensive listing
@@ -321,6 +426,9 @@ fi
 # Main Script Variables
 # =============================================================================
 
+# Initialize logging
+log_init
+
 # OPT 5: In-memory hash cache for O(1) lookups
 typeset -A MMAP_CACHE=()
 typeset -a MMAP_NEW_ENTRIES=()
@@ -445,6 +553,7 @@ is_cached_exclusion() {
     if [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]]; then
         if [[ -n "${MMAP_CACHE[$dir_path]:-}" ]]; then
             [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "- $dir_path found in memory cache, skipping."
+            log_skip "$dir_path" "memory_cache"
             return 0
         fi
         return 1
@@ -453,6 +562,7 @@ is_cached_exclusion() {
     # Fallback: grep file (slower, O(n))
     if [[ -f "${ASIMOV_CONFIG[opt_cache_file]}" ]] && grep -qF "$dir_path" "${ASIMOV_CONFIG[opt_cache_file]}" 2>/dev/null; then
         [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "- $dir_path found in file cache, skipping."
+        log_skip "$dir_path" "file_cache"
         return 0
     fi
     return 1
@@ -667,6 +777,7 @@ exclude_path() {
     
     if [[ "$status_output" == *"[Excluded]"* ]]; then
         [[ "${ASIMOV_CONFIG[verbose]}" == "true" ]] && print -- "- $dir_path is already excluded, skipping."
+        log_skip "$dir_path" "already_excluded"
         # OPT 1: Add to cache
         add_to_cache "$dir_path"
         return
@@ -678,9 +789,11 @@ exclude_path() {
     
     if [[ "${ASIMOV_CONFIG[dry_run]}" == "true" ]]; then
         print -- "[DRY-RUN] Would exclude: $dir_path ($sizeondisk)"
+        log_info "DRY-RUN: Would exclude $dir_path ($sizeondisk)"
     else
         tmutil addexclusion "$dir_path"
         print -- "- $dir_path has been excluded from Time Machine backups ($sizeondisk)."
+        log_excl "$dir_path" "$sizeondisk"
         # OPT 1: Add to cache
         add_to_cache "$dir_path"
     fi
@@ -714,6 +827,7 @@ print_config() {
         [[ "${ASIMOV_CONFIG[opt_dust]}" == "true" ]] && print "  - Using dust for size (OPT 6)"
         [[ "${ASIMOV_CONFIG[opt_skip_size]}" == "true" ]] && print "  - Skip size calculation (OPT 6)"
         [[ "${ASIMOV_CONFIG[opt_batch]}" == "true" ]] && print "  - Batch operations (OPT 7): batch size ${ASIMOV_CONFIG[opt_batch_size]}"
+        [[ -n "${ASIMOV_CONFIG[log_file]}" ]] && print "  - Logging (OPT 8): ${ASIMOV_CONFIG[log_file]} (${ASIMOV_CONFIG[log_format]})"
     fi
 }
 
@@ -725,6 +839,9 @@ print_config
 typeset -i SCAN_START_TIME=$(date +%s)
 typeset -i SCAN_DIRS_FOUND=0
 typeset -i SCAN_DIRS_EXCLUDED=0
+
+# Log scan start
+log_scan_start
 
 # Build fd regex pattern for directory names
 typeset fd_pattern
@@ -802,6 +919,9 @@ typeset -i SCAN_DURATION=$((SCAN_END_TIME - SCAN_START_TIME))
 if [[ "${ASIMOV_CONFIG[opt_mmap]}" == "true" ]]; then
     SCAN_DIRS_EXCLUDED=${#MMAP_NEW_ENTRIES[@]}
 fi
+
+# Log scan completion
+log_scan_complete "$SCAN_DIRS_FOUND" "$SCAN_DIRS_EXCLUDED" "$SCAN_DURATION"
 
 # Save run status for --status command
 if [[ "${ASIMOV_CONFIG[dry_run]}" != "true" ]]; then
