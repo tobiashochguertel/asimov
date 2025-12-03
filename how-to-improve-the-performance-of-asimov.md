@@ -2,55 +2,72 @@
 
 This document outlines strategies and optimizations to improve the performance of the `asimov` script, which excludes development dependency directories from Apple Time Machine backups.
 
-## Executive Summary
+## Implementation Status Overview
 
-The original `asimov` script uses `bash` with `find` for directory traversal. By switching to `zsh` with `fd`, we can achieve significant performance improvements due to:
+| #  | Improvement                                    | Status     | Notes                                                                        |
+|----|------------------------------------------------|------------|------------------------------------------------------------------------------|
+| 1  | Use `fd` instead of `find`                     | ✅ Done     | Parallel directory traversal with fd                                         |
+| 2  | Use ZSH Builtins                               | ✅ Done     | Native string operations, pattern matching                                   |
+| 3  | Load ZSH Modules                               | ✅ Done     | zsh/stat, zsh/datetime, zsh/parameter, zsh/zutil                             |
+| 4  | Precompute Directory/Sentinel Mappings         | ✅ Done     | `SENTINEL_MAP` associative array                                             |
+| 5  | Batch Operations                               | ⚠️ Partial | Parallel tmutil via `ASIMOV_OPT_PARALLEL`, but not batch `tmutil isexcluded` |
+| 6  | Caching Exclusion Status                       | ✅ Done     | `ASIMOV_OPT_CACHE` with file-based cache                                     |
+| 7  | Incremental Scanning                           | ✅ Done     | `ASIMOV_OPT_INCREMENTAL` with `--changed-within`                             |
+| 8  | Parallel tmutil Calls                          | ✅ Done     | `ASIMOV_OPT_PARALLEL` with job pool management                               |
+| 9  | Use `.gitignore` Awareness                     | ✅ Done     | `ASIMOV_OPT_GITIGNORE` flag                                                  |
+| 10 | Memory-Mapped File Operations (In-Memory Hash) | ✅ Done     | `ASIMOV_OPT_MMAP` with `MMAP_CACHE`                                          |
+| 11 | Alternative to `du` (dust)                     | ✅ Done     | `ASIMOV_OPT_DUST` flag                                                       |
+| 12 | SQLite Cache                                   | ❌ Open     | Not implemented (recommended for 100,000+ exclusions)                        |
+| 13 | Batch `du` for multiple paths                  | ❌ Open     | Currently per-path, not batched                                              |
 
-1. **Parallel directory traversal** with `fd`
-2. **Native ZSH string operations** instead of external tools
-3. **Compiled Rust performance** of `fd` vs interpreted shell in `find`
+---
 
-## Performance Bottlenecks in Original Implementation
+## Open
 
-### 1. Sequential Directory Traversal with `find`
+The following improvements are not yet implemented in `asimov-zsh`:
 
-The original script uses GNU `find` which traverses directories sequentially:
+### SQLite Cache
 
-```bash
-find "${ASIMOV_ROOT}" \( "${find_parameters_skip[@]}" \) \( -false "${find_parameters_vendor[@]}" \)
+For very large exclusion lists (100,000+), consider using SQLite:
+
+```zsh
+# Using sqlite3 CLI (available on macOS by default)
+sqlite3 ~/.cache/asimov.db "CREATE TABLE IF NOT EXISTS exclusions (path TEXT PRIMARY KEY)"
+sqlite3 ~/.cache/asimov.db "SELECT 1 FROM exclusions WHERE path='$dir_path' LIMIT 1"
+sqlite3 ~/.cache/asimov.db "INSERT OR IGNORE INTO exclusions VALUES ('$dir_path')"
 ```
 
-**Issue**: `find` is single-threaded and processes directories one at a time.
+Benefits:
 
-### 2. External Tool Invocations
+- **Indexed lookups** - O(log n) instead of O(n)
+- **ACID transactions** - Safe concurrent access
+- **Compression** - SQLite compresses data automatically
 
-The script uses external tools for simple operations:
+### Batch `tmutil isexcluded` Calls
 
-```bash
-sizeondisk=$(du -hs "${path}" | cut -f1)  # External cut
-grep -Fq '[Excluded]'                     # External grep
+Currently each path is checked individually. Batch checking could reduce overhead:
+
+```zsh
+# Batch exclusion check
+tmutil isexcluded "${paths[@]}" | while read ...
 ```
 
-**Issue**: Each external tool invocation creates a new subprocess, adding overhead.
+### Batch `du` for Size Calculation
 
-### 3. Complex Find Expression
+Currently each directory size is calculated individually:
 
-The script builds a complex `find` expression with many `-or` conditions:
-
-```bash
-find_parameters_vendor+=( -or \( \
-    -type d \
-    -name "${_exclude_name}" \
-    -execdir test -e "${_sibling_sentinel_name}" \; \
-    ...
-\) )
+```zsh
+# Parallel size calculation (if needed)
+du -hs "${paths[@]}" 2>/dev/null
 ```
 
-**Issue**: Each condition is evaluated sequentially for every directory.
+---
 
-## Optimization Strategies
+## Done
 
-### Strategy 1: Use `fd` Instead of `find`
+The following improvements have been implemented in `asimov-zsh`:
+
+### Use `fd` Instead of `find`
 
 [fd](https://github.com/sharkdp/fd) is a modern replacement for `find` written in Rust:
 
@@ -71,7 +88,7 @@ fd_pattern="^(node_modules|vendor|\.venv|target|\.gradle)\$"
 fd --type d --hidden --no-ignore "$fd_pattern" ~/
 ```
 
-### Strategy 2: Use ZSH Builtins
+### Use ZSH Builtins
 
 ZSH provides powerful built-in features that eliminate subprocess overhead:
 
@@ -92,7 +109,7 @@ sizeondisk="${$(du -hs "$path")%%$'\t'*}"
 [[ "$output" == *"[Excluded]"* ]]
 ```
 
-### Strategy 3: Load ZSH Modules
+### Load ZSH Modules
 
 ZSH modules provide optimized implementations:
 
@@ -103,7 +120,7 @@ zmodload zsh/parameter # Parameter introspection
 zmodload zsh/zutil     # Parsing utilities
 ```
 
-### Strategy 4: Precompute Directory/Sentinel Mappings
+### Precompute Directory/Sentinel Mappings
 
 Instead of building complex find expressions, precompute a hash map:
 
@@ -114,111 +131,11 @@ SENTINEL_MAP[vendor]="composer.json Gemfile go.mod"
 SENTINEL_MAP[.venv]="requirements.txt pyproject.toml"
 ```
 
-### Strategy 5: Batch Operations
+### Caching Exclusion Status
 
-Group similar operations to reduce syscall overhead:
+Cache already-excluded paths to avoid repeated `tmutil isexcluded` calls.
 
-```zsh
-# Batch exclusion check
-tmutil isexcluded "${paths[@]}" | while read ...
-
-# Parallel size calculation (if needed)
-du -hs "${paths[@]}" 2>/dev/null
-```
-
-## Alternative Tools Comparison
-
-### `fd` vs `find` vs `rg` vs `ack`
-
-| Tool           | Use Case         | Speed | Best For                |
-|----------------|------------------|-------|-------------------------|
-| `fd`           | File/dir finding | ⭐⭐⭐⭐⭐ | Directory traversal     |
-| `find`         | File/dir finding | ⭐⭐⭐   | POSIX compatibility     |
-| `rg` (ripgrep) | Content search   | ⭐⭐⭐⭐⭐ | Searching file contents |
-| `ack`          | Content search   | ⭐⭐⭐   | Perl regex support      |
-
-**Recommendation**: Use `fd` for directory finding (our use case). `rg` and `ack` are content search tools and not optimal for finding directories by name.
-
-## Implementation: `asimov-zsh`
-
-The optimized implementation (`asimov-zsh`) includes:
-
-1. **ZSH shebang** with strict mode:
-
-   ```zsh
-   #!/usr/bin/env zsh
-   setopt ERR_EXIT NO_UNSET PIPE_FAIL
-   ```
-
-2. **Module loading**:
-
-   ```zsh
-   zmodload zsh/stat
-   zmodload zsh/datetime
-   ```
-
-3. **`fd` for parallel search**:
-
-   ```zsh
-   fd --type d --hidden --no-ignore "$fd_pattern" ~/
-   ```
-
-4. **Native string operations**:
-
-   ```zsh
-   local dir_name="${pair%% *}"
-   local sentinel="${pair#* }"
-   ```
-
-## Benchmarking
-
-Use the provided `benchmark-asimov.zsh` script to compare implementations:
-
-```bash
-./benchmark-asimov.zsh --runs 10 --warmup 3
-```
-
-### Important Notes on Performance
-
-**Small vs Large Filesystems:**
-
-- On **small directory trees** (few hundred directories), `find` may actually be faster due to `fd`'s startup overhead
-- On **large filesystems** (thousands of directories), `fd`'s parallel traversal provides significant speedup
-- The crossover point depends on disk speed, CPU cores, and directory structure
-
-**Initial Benchmark Results (Small Test Environment):**
-
-| Command              |    Mean [ms] | Relative |
-|:---------------------|-------------:|---------:|
-| bash+find (original) | 250.1 ± 34.0 |     1.00 |
-| zsh+fd (optimized)   | 723.6 ± 36.0 |     2.89 |
-
-The small test environment (~200 files) shows `find` winning due to `fd`'s Rust runtime initialization overhead.
-
-**Real-World Benchmark Results (~/work-dev - Large Development Directory):**
-
-| Command              |       Mean [s] | Relative |
-|:---------------------|---------------:|---------:|
-| bash+find (original) | 64.112 ± 1.393 |     2.44 |
-| zsh+fd (optimized)   | 26.222 ± 0.134 | **1.00** |
-
-On a real development directory with many projects and deep `node_modules` trees, **`fd` is 2.44x faster than `find`**!
-
-**Real-World Performance (Large Home Directory):**
-
-For actual home directories with many projects, `fd` typically outperforms `find` by 2-5x because:
-
-- Parallel directory traversal uses all CPU cores
-- Smart ignore patterns skip unnecessary traversal
-- Rust's optimized I/O operations
-
-**Recommendation:** Run benchmarks on your actual filesystem to determine which performs better for your use case.
-
-## Additional Optimization Ideas
-
-### 1. Caching Exclusion Status
-
-Cache already-excluded paths to avoid repeated `tmutil isexcluded` calls:
+**Implementation**: `ASIMOV_OPT_CACHE=true` enables file-based caching at `~/.cache/asimov-exclusions`.
 
 ```zsh
 # Store exclusions in a file
@@ -230,18 +147,22 @@ if grep -qF "$path" "$CACHE_FILE"; then
 fi
 ```
 
-### 2. Incremental Scanning
+### Incremental Scanning
 
-Only scan directories modified since last run:
+Only scan directories modified since last run.
+
+**Implementation**: `ASIMOV_OPT_INCREMENTAL=true` with `ASIMOV_OPT_INCREMENTAL_DAYS=7` (default).
 
 ```zsh
-# Use find with -newer
+# Use fd with --changed-within
 fd --changed-within 1day ...
 ```
 
-### 3. Parallel tmutil Calls
+### Parallel tmutil Calls
 
-Use GNU Parallel or ZSH's built-in job control:
+Use ZSH's built-in job control for parallel exclusions.
+
+**Implementation**: `ASIMOV_OPT_PARALLEL=true` with `ASIMOV_OPT_PARALLEL_JOBS=4` (default).
 
 ```zsh
 # Background multiple exclusions
@@ -251,25 +172,27 @@ done
 wait
 ```
 
-### 4. Use `.gitignore` Awareness
+### Use `.gitignore` Awareness
 
-`fd` respects `.gitignore` by default, which can speed up searches:
+`fd` respects `.gitignore` by default, which can speed up searches.
+
+**Implementation**: `ASIMOV_OPT_GITIGNORE=true` removes `--no-ignore` flag from fd.
 
 ```zsh
 fd --type d "$pattern" ~/  # Automatically ignores .git paths
 ```
 
-### 5. Memory-Mapped File Operations
+### Memory-Mapped File Operations (In-Memory Hash)
 
-For very large filesystems with thousands of exclusions, reading/writing the cache file on every operation can become a bottleneck. Memory-mapped I/O can help by:
+For very large filesystems with thousands of exclusions, reading/writing the cache file on every operation can become a bottleneck.
+
+**Implementation**: `ASIMOV_OPT_MMAP=true` loads cache into `MMAP_CACHE` associative array for O(1) lookups and batches writes at the end via `flush_mmap_cache()`.
 
 1. **Mapping the cache file directly into memory** - The OS handles paging efficiently
 2. **Avoiding repeated file I/O** - Changes are written to memory first, then synced
 3. **Faster lookups** - The entire exclusion list is in memory
 
-#### ZSH Implementation Concept
-
-ZSH doesn't have native mmap support, but we can achieve similar benefits with:
+#### ZSH Implementation
 
 ```zsh
 # Load entire cache into an associative array at startup
@@ -306,23 +229,6 @@ flush_cache() {
 - **Network-mounted filesystems** - Reduces network round-trips
 - **SSDs with limited write cycles** - Batches writes together
 
-#### Alternative: SQLite Cache
-
-For very large exclusion lists (100,000+), consider using SQLite:
-
-```zsh
-# Using sqlite3 CLI (available on macOS by default)
-sqlite3 ~/.cache/asimov.db "CREATE TABLE IF NOT EXISTS exclusions (path TEXT PRIMARY KEY)"
-sqlite3 ~/.cache/asimov.db "SELECT 1 FROM exclusions WHERE path='$dir_path' LIMIT 1"
-sqlite3 ~/.cache/asimov.db "INSERT OR IGNORE INTO exclusions VALUES ('$dir_path')"
-```
-
-Benefits:
-
-- **Indexed lookups** - O(log n) instead of O(n)
-- **ACID transactions** - Safe concurrent access
-- **Compression** - SQLite compresses data automatically
-
 #### Performance Impact
 
 | Cache Method   | Lookup Time | Memory Usage | Write Latency |
@@ -331,11 +237,17 @@ Benefits:
 | Hash in memory | O(1)        | Medium       | Batch at end  |
 | SQLite         | O(log n)    | Low          | Transactional |
 
-**Recommendation**: For most users, the in-memory hash approach (implemented as `ASIMOV_OPT_CACHE`) is sufficient. SQLite is only needed for enterprise-scale deployments.
+### Alternative to `du` (dust)
 
-### 6. Alternative to `du`
+Replace `du` with `dust` which is faster and written in Rust.
 
-We might can replace `du` with `dust` which is faster and written in Rust too:
+**Implementation**: `ASIMOV_OPT_DUST=true` uses dust for size calculation. Additionally, `ASIMOV_OPT_SKIP_SIZE=true` skips size calculation entirely for maximum speed.
+
+---
+
+## Reference Documentation
+
+### dust Help
 
 ```bash
 ❯ dust --help
