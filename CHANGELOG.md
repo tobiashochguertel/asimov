@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](http://semver.org/).
 
+## [Version 0.11.1] — 2025-12-06
+
+### Fixed
+
+* Fixed launchd service failure (exit code 1) caused by missing PATH in plist ([#CRITICAL])
+  - Root cause: The `asimov-zsh` script depends on `fd` command installed via Homebrew at `/opt/homebrew/bin/fd`
+  - launchd services run with minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) that doesn't include Homebrew directories
+  - Solution: Added PATH environment variable to plist to include `/opt/homebrew/bin` and `/usr/local/bin`
+  - This ensures the service can find all required dependencies when running automatically
+
+### Added
+
+* Created comprehensive troubleshooting guide at `docs/TROUBLESHOOTING.md`
+  - Documents the service failure issue and solution
+  - Includes common dependency issues, performance troubleshooting, and service management commands
+  - Provides verification steps to ensure service is working correctly
+
 ## [Version 0.3.0] — 2020-06-16
 
 ### Added

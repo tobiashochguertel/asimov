@@ -16,6 +16,10 @@
                 The installed plist will have absolute paths.
             -->
             
+            <!-- PATH needs to include Homebrew bin for fd command -->
+            <key>PATH</key>
+            <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+            
             <!-- Enable caching for faster subsequent runs -->
             <key>ASIMOV_OPT_CACHE</key>
             <string>true</string>

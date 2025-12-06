@@ -323,6 +323,7 @@ The repository includes a benchmark script to compare performance:
 - **[User Guide](docs/USER-GUIDE.md)** - How to use and maintain asimov over time
 - **[Migration Guide](docs/MIGRATION-GUIDE.md)** - Migrating from original asimov to the ZSH version
 - **[Performance Guide](how-to-improve-the-performance-of-asimov.md)** - Detailed optimization strategies and benchmarks
+- **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ## Contributing
 

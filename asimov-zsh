@@ -12,7 +12,7 @@
 # - ZSH native string manipulation instead of external cut/grep
 # - Uses zsh/stat module for faster file operations
 #
-# @version 0.11.0
+# @version 0.11.1
 # @author  Steve Grunwell (Original Author)
 # @author  Tobias Hochguerel <tobias.hochguertel@googlemail.com> (Fork Maintainer)
 # @license MIT
@@ -72,7 +72,7 @@ EOF
 }
 
 show_version() {
-    echo "asimov-zsh version 0.11.0"
+    echo "asimov-zsh version 0.11.1"
     echo "https://github.com/tobiashochguertel/asimov"
 }
 
