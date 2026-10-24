@@ -1,0 +1,30 @@
+Benchmark / dry-run fixture
+===========================
+
+A minimal directory tree used for two purposes:
+
+1. Correctness check — run `asimov --dry-run tests/fixture` and verify the
+   output matches the expected set below.
+
+2. Reproducible benchmark — `make bench` times both v0.5.x and v0.4.2 against
+   this tree so results are comparable across machines and runs.
+
+Expected to be EXCLUDED (sentinel present beside dep dir)
+----------------------------------------------------------
+  node-project/node_modules          (sentinel: package.json)
+  rust-project/target                (sentinel: Cargo.toml)
+  python-requirements/.venv          (sentinel: requirements.txt)
+  python-pyproject/.venv             (sentinel: pyproject.toml)
+  ruby-project/vendor                (sentinel: Gemfile)
+  php-project/vendor                 (sentinel: composer.json)
+  go-project/vendor                  (sentinel: go.mod)
+  elixir-project/deps                (sentinel: mix.exs)
+  elixir-project/_build              (sentinel: mix.exs)
+  swift-project/.build               (sentinel: Package.swift)
+  monorepo/frontend/node_modules     (sentinel: package.json)
+  monorepo/backend/target            (sentinel: Cargo.toml)
+  monorepo/shared/vendor             (sentinel: go.mod)
+
+Expected to be SKIPPED (no sentinel)
+-------------------------------------
+  no-sentinel/node_modules           (no package.json present)

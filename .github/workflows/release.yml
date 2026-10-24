@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install bats-core shellcheck
+
+      - name: Run tests and linting
+        run: make check
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          FULL_VERSION="${TAG#v}"
+          BASE_VERSION="${FULL_VERSION%%-*}"
+
+          PRERELEASE_FLAG=""
+          if [[ "$FULL_VERSION" != "$BASE_VERSION" ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          NOTES_FILE=$(mktemp)
+          awk '/^## \['"$BASE_VERSION"'\]/{found=1; next} found && /^## /{exit} found{print}' CHANGELOG.md > "$NOTES_FILE"
+
+          # Asimov is a launcher plus a library and data files, so the asset is a
+          # tarball of all three rather than a single script. It unpacks to
+          # asimov-<version>/{bin,lib,data} and installs with scripts/install.sh.
+          STAGE="asimov-${FULL_VERSION}"
+          mkdir -p "$STAGE"
+          cp -a bin lib data scripts LICENSE.txt README.md CHANGELOG.md UPGRADING.md \
+            com.stevegrunwell.asimov.plist "$STAGE/"
+          TARBALL="${STAGE}.tar.gz"
+          tar -czf "$TARBALL" "$STAGE"
+
+          gh release create "$TAG" \
+            --title "Asimov $TAG" \
+            --notes-file "$NOTES_FILE" \
+            $PRERELEASE_FLAG \
+            "$TARBALL"
+
+          rm -rf "$NOTES_FILE" "$STAGE" "$TARBALL"
