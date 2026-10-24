@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.plist text eol=lf

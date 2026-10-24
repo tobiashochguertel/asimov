@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Mock mdfind for testing — returns nothing by default.
+#
+# Query types (detected by inspecting arguments):
+#   - Excluded-paths query (com_apple_backup_excludeItem):
+#       Returns contents of ASIMOV_TEST_MDFIND_RESULTS if set.
+#   - Sentinel discovery query (kMDItemFSName):
+#       Returns contents of ASIMOV_TEST_MDFIND_SENTINEL_RESULTS if set.
+set -euo pipefail
+
+# Join all args to detect query type
+all_args="$*"
+
+if [[ "$all_args" == *"kMDItemFSName"* ]]; then
+    # Sentinel discovery query (incremental cache)
+    if [[ -n "${ASIMOV_TEST_MDFIND_SENTINEL_RESULTS:-}" && -f "${ASIMOV_TEST_MDFIND_SENTINEL_RESULTS}" ]]; then
+        cat "${ASIMOV_TEST_MDFIND_SENTINEL_RESULTS}"
+    fi
+else
+    # Excluded-paths query (Time Machine backup check)
+    if [[ -n "${ASIMOV_TEST_MDFIND_RESULTS:-}" && -f "${ASIMOV_TEST_MDFIND_RESULTS}" ]]; then
+        cat "${ASIMOV_TEST_MDFIND_RESULTS}"
+    fi
+fi

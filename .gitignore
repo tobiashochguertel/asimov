@@ -1,0 +1,9 @@
+.DS_Store
+.worktrees
+.idea
+.vscode
+.cursor
+.claude
+CLAUDE.md
+docs/plans/
+docs/triage/
